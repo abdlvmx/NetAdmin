@@ -1,0 +1,237 @@
+{{define "title"}}Устройства{{end}}
+
+{{define "extra_head"}}
+<style>
+  .device-name { font-weight: 600; }
+  .dev-link { color: var(--accent); text-decoration: none; }
+  .dev-link:hover { text-decoration: underline; }
+  .device-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .inv-line { color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chart-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin: 10px 0; }
+  .chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+  .chart-canvas { width: 100%; height: 260px; display: block; }
+  .range button { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+    padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 7px; margin-left: 4px; }
+  .range button.on { background: var(--accent-soft); color: var(--accent-hov); border-color: transparent; }
+</style>
+{{end}}
+
+{{define "deviceFields"}}
+<div class="form-row cols-2">
+  <div class="form-group"><label>Имя хоста *</label><input name="hostname" required></div>
+  <div class="form-group"><label>IP-адрес</label><input name="ip_address"></div>
+</div>
+<div class="form-row cols-2">
+  <div class="form-group"><label>MAC-адрес</label><input name="mac_address"></div>
+  <div class="form-group"><label>ОС</label><input name="os_type"></div>
+</div>
+<div class="form-row cols-2">
+  <div class="form-group"><label>Тип устройства</label><input name="device_type" placeholder="ПК, ноутбук, принтер…"></div>
+  <div class="form-group">
+    <label>Сотрудник</label>
+    <select name="employee_id">
+      <option value="">— не назначен —</option>
+      {{range .}}<option value="{{.ID}}">{{.Name}}{{if .Dept}} · {{.Dept}}{{end}}</option>{{end}}
+    </select>
+  </div>
+</div>
+<div class="form-row cols-3">
+  <div class="form-group"><label>Производитель</label><input name="manufacturer"></div>
+  <div class="form-group"><label>Модель</label><input name="model"></div>
+  <div class="form-group"><label>Серийный №</label><input name="serial_number"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Расположение</label><input name="location"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Заметки</label><textarea name="notes"></textarea></div>
+</div>
+<div class="form-row">
+  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text)">
+    <input type="checkbox" name="critical" value="1" style="width:auto"> Критически важное устройство (email-алерт при потере связи)
+  </label>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Устройства</h1>
+    <div class="sub">Инвентарь, владельцы и мониторинг</div>
+  </div>
+  {{if .User.CanWrite}}
+  <div class="flex gap-2">
+    <button class="btn btn-ghost" id="scan-btn" onclick="scanNetwork()">Сканировать сеть</button>
+    <button class="btn btn-primary" onclick="openModal('modal-add')">+ Добавить</button>
+  </div>
+  {{end}}
+</div>
+
+<div class="content">
+  <div class="toolbar">
+    <input type="text" placeholder="Поиск: хост, IP, владелец, расположение…" data-filter-target="#dev-body">
+    <select data-filter-target="#dev-body" data-col="status">
+      <option value="all">Все статусы</option>
+      <option value="online">Онлайн</option>
+      <option value="offline">Оффлайн</option>
+      <option value="unknown">Неизвестно</option>
+    </select>
+    <a href="/devices/export" class="btn btn-ghost">Экспорт CSV</a>
+  </div>
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort title="Сортировка по IP-адресу (по возрастанию / убыванию)">Хост / IP</th><th>Инвентарь</th><th>Владелец</th>
+            <th>Расположение</th><th data-sort title="Установлен ли агент на устройстве">Агент</th><th data-sort>Статус</th><th data-sort>Онлайн</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="dev-body">
+          {{range .Devices}}
+          <tr id="row-{{.ID}}" data-status="{{.Status}}" data-alert="{{if .Alert}}1{{else}}0{{end}}">
+            <td data-sort-val="{{.IP}}">
+              <div class="device-name"><a href="/devices/{{.ID}}" class="dev-link">{{.Hostname}}</a>{{if .Critical}} <span class="badge badge-amber" style="font-size:10px" title="критически важное — мониторинг доступности">★</span>{{end}}</div>
+              <div class="device-meta">{{if .IP}}{{.IP}}{{else}}—{{end}}{{if .MAC}} · {{.MAC}}{{end}}</div>
+            </td>
+            <td>
+              <div>{{if .DeviceType}}{{.DeviceType}}{{else}}Устройство{{end}}</div>
+              <div class="inv-line">{{.Manufacturer}} {{.Model}}</div>
+              <div class="inv-line">{{if .OSType}}ОС: {{.OSType}}{{else if .OSGuess}}ОС: {{.OSGuess}} <span class="text-muted">(по TTL)</span>{{end}}</div>
+              {{if .OpenPorts}}
+              <div class="inv-line">Порты:
+                {{range .OpenPorts}}{{if or (eq . 23) (eq . 445)}}<span class="badge badge-red" title="небезопасный порт">{{.}}</span>{{else}}<span class="badge badge-gray">{{.}}</span>{{end}} {{end}}
+              </div>
+              {{end}}
+            </td>
+            <td>{{if .EmployeeName}}{{.EmployeeName}}{{else if .OwnerName}}{{.OwnerName}}{{else}}—{{end}}</td>
+            <td class="text-muted">{{if .Location}}{{.Location}}{{else}}—{{end}}</td>
+            <td data-sort-val="{{if .HasToken}}1{{else}}0{{end}}">
+              {{if .HasToken}}<span class="badge badge-green" title="агент установлен и зарегистрирован">✓ агент</span>
+              {{else}}<span class="text-muted">—</span>{{end}}
+            </td>
+            <td id="status-{{.ID}}">
+              {{if eq .Status "online"}}<span class="badge badge-green">онлайн</span>
+              {{else if eq .Status "offline"}}<span class="badge badge-red">оффлайн</span>
+              {{else}}<span class="badge badge-gray">неизвестно</span>{{end}}
+            </td>
+            <td id="seen-{{.ID}}" class="text-muted" style="white-space:nowrap">{{if .LastSeen}}{{.LastSeen}}{{else}}—{{end}}</td>
+            <td>
+              <div class="row-actions">
+                <a class="btn btn-ghost btn-sm" href="/devices/{{.ID}}" title="Открыть страницу устройства">Открыть</a>
+                {{if $.User.CanWrite}}
+                {{if .IP}}<button class="btn btn-ghost btn-sm" onclick="pingDevice('{{.IP}}',{{.ID}})">Ping</button>{{end}}
+                {{if .IP}}<button class="btn btn-ghost btn-sm" onclick="scanPorts({{.ID}},this)">Порты</button>{{end}}
+                {{end}}
+              </div>
+            </td>
+          </tr>
+          {{else}}
+          <tr><td colspan="8" class="empty">Устройств нет. Добавьте вручную или запустите агента.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-add" onclick="closeOnOverlay(event,'modal-add')">
+  <div class="modal modal-wide">
+    <h3>Добавить устройство</h3>
+    <form method="post" action="/devices/create">
+      {{template "deviceFields" .Employees}}
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add')">Отмена</button>
+        <button type="submit" class="btn btn-primary">Добавить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{end}}
+
+{{define "scripts"}}
+<script>
+function openModal(id){ document.getElementById(id).classList.add('open'); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+function closeOnOverlay(e,id){ if(e.target===e.currentTarget) closeModal(id); }
+
+async function scanNetwork(){
+  const b = document.getElementById('scan-btn');
+  const old = b.textContent;
+  b.disabled = true; b.textContent = 'Сканирование…';
+  try{
+    const r = await fetch('/api/scan',{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}});
+    const d = await r.json();
+    b.textContent = `Найдено: ${d.found}`;
+    toast(`Сканирование завершено: найдено устройств — ${d.found}`, 'ok');
+    setTimeout(()=>location.reload(), 900);
+  }catch(e){
+    b.textContent = 'Ошибка'; b.disabled = false;
+    toast('Ошибка сканирования сети', 'err');
+    setTimeout(()=>{ b.textContent = old; }, 1500);
+  }
+}
+
+async function pingDevice(ip,id){
+  const el = document.getElementById('status-'+id);
+  el.innerHTML = '<span class="badge badge-amber">пинг…</span>';
+  try{
+    const r = await fetch('/api/ping',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':window.csrfToken},body:JSON.stringify({ip})});
+    const d = await r.json();
+    el.innerHTML = d.status==='online'
+      ? '<span class="badge badge-green">онлайн</span>'
+      : '<span class="badge badge-red">оффлайн</span>';
+  }catch(e){ el.innerHTML = '<span class="badge badge-gray">ошибка</span>'; }
+}
+
+async function scanPorts(id, btn){
+  const old = btn.textContent; btn.disabled = true; btn.textContent = 'Скан…';
+  try{
+    const r = await fetch(`/devices/${id}/scan-ports`,{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}});
+    const d = await r.json();
+    if(d.ok){ toast('Открытые порты: ' + (d.ports && d.ports.length ? d.ports.join(', ') : 'нет'), 'ok'); setTimeout(()=>location.reload(), 900); }
+    else { toast(d.error || 'Ошибка', 'err'); btn.disabled=false; btn.textContent=old; }
+  }catch(e){ toast('Ошибка сканирования портов', 'err'); btn.disabled=false; btn.textContent=old; }
+}
+
+// ── авто-обновление статусов устройств (без перезагрузки) ──
+function statusBadge(s){
+  if(s==='online')  return '<span class="badge badge-green">онлайн</span>';
+  if(s==='offline') return '<span class="badge badge-red">оффлайн</span>';
+  return '<span class="badge badge-gray">неизвестно</span>';
+}
+async function refreshStatuses(){
+  if(document.hidden) return; // не дёргаем сервер, если вкладка не активна
+  try{
+    const d = await (await fetch('/api/devices/status')).json();
+    (d.devices||[]).forEach(dev=>{
+      const st = document.getElementById('status-'+dev.id);
+      if(st) st.innerHTML = statusBadge(dev.status);
+      const sn = document.getElementById('seen-'+dev.id);
+      if(sn) sn.textContent = dev.last_seen || '—';
+      const row = document.getElementById('row-'+dev.id);
+      if(row) row.dataset.status = dev.status;
+    });
+  }catch(e){}
+}
+setInterval(refreshStatuses, 20000);
+
+// ── применить фильтр из URL (клики с дашборда: ?status=offline, ?alerts=1) ──
+window.addEventListener('DOMContentLoaded', ()=>{
+  const p = new URLSearchParams(location.search);
+  const status = p.get('status');
+  if(status){
+    const sel = document.querySelector('select[data-col="status"]');
+    if(sel){ sel.value = status; sel.dispatchEvent(new Event('change')); }
+  }
+  if(p.get('alerts')==='1'){
+    document.querySelectorAll('#dev-body tr').forEach(tr=>{
+      if(tr.querySelector('td')) tr.style.display = (tr.dataset.alert==='1') ? '' : 'none';
+    });
+    toast('Показаны устройства с предупреждениями (оффлайн / перегруз / нет связи)', '');
+  }
+});
+</script>
+{{end}}

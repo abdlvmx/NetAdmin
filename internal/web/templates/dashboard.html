@@ -1,0 +1,250 @@
+{{define "title"}}Дашборд{{end}}
+
+{{define "extra_head"}}
+<style>
+  .stats-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .stat-card { display: flex; flex-direction: column; gap: 10px; }
+  .stat-top { display: flex; align-items: center; gap: 10px; }
+  .stat-ic { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center;
+    justify-content: center; font-size: 18px; flex-shrink: 0; }
+  .ic-blue { background: var(--accent-soft); } .ic-amber { background: var(--amber-soft); }
+  .ic-red { background: var(--red-soft); } .ic-green { background: var(--green-soft); }
+  .ic-violet { background: var(--violet-soft); }
+  .stat-top .stat-label { margin: 0; flex: 1; }
+  .stat-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+  .stat-badge.green { background: var(--green-soft); color: var(--green); }
+  .stat-value { font-size: 26px; font-weight: 750; letter-spacing: -0.5px; }
+  .stat-value.sm { font-size: 19px; }
+  .stat-of { font-size: 15px; color: var(--muted); font-weight: 600; }
+  a.stat-card { text-decoration: none; color: inherit; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+  a.stat-card:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+  a.legend-item { text-decoration: none; color: inherit; cursor: pointer; border-radius: 8px;
+    padding: 4px 6px; margin: -4px -6px; transition: background .12s; }
+  a.legend-item:hover { background: var(--accent-soft); }
+  .sec-head { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.5px; margin: 22px 0 12px; }
+  .score-good { color: var(--green); } .score-medium { color: #d97706; } .score-poor { color: var(--red); }
+  .bar-good { background: var(--green); } .bar-medium { background: #d97706; } .bar-poor { background: var(--red); }
+
+  .dash-row { display: grid; grid-template-columns: 1.7fr 1fr 1fr; gap: 16px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tabs button { border: none; background: transparent; color: var(--muted); font-size: 13px;
+    font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+  .tabs button.on { background: var(--accent-soft); color: var(--accent); }
+  .range button { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+    padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 7px; margin-left: 4px; }
+  .range button.on { background: var(--accent); color: #fff; border-color: transparent; }
+  .chart-canvas { width: 100%; height: 250px; display: block; }
+
+  .donut-wrap { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .legend { width: 100%; display: flex; flex-direction: column; gap: 9px; }
+  .legend-item { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+  .legend-item .lg-name { flex: 1; }
+  .legend-item .lg-num { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .legend-item .lg-pct { color: var(--muted); width: 38px; text-align: right; }
+
+  .bar-row { margin-bottom: 14px; }
+  .bar-row:last-child { margin-bottom: 0; }
+  .bar-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; }
+  .bar-head .host { font-weight: 600; }
+  .bar-head .val { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bar-track { height: 7px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 6px; background: var(--accent); }
+  .bar-fill.warn { background: var(--amber); } .bar-fill.crit { background: var(--red); }
+
+  .act { display: grid; grid-template-columns: 32px 46px 1fr auto; align-items: center; gap: 11px;
+    padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .act:last-child { border-bottom: none; }
+  .act-ic { width: 32px; height: 32px; border-radius: 9px; background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .act-time { color: var(--muted); font-size: 12px; }
+  .act-cat { color: var(--muted); font-size: 12px; }
+
+  .pills { display: flex; gap: 6px; }
+  .pills button { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+    font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 20px; cursor: pointer; }
+  .pills button.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Дашборд</h1>
+    <div class="sub">Обзор сети и безопасности</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  <div class="stats-grid">
+    <a href="/devices?status=online" class="stat-card" title="Показать устройства онлайн">
+      <div class="stat-top"><div class="stat-ic ic-blue">💻</div><div class="stat-label">Устройства онлайн</div>
+        {{if .Stats.DevicesTotal}}<span class="stat-badge green" id="d-onpct">{{.Stats.DevicesOnlinePct}}%</span>{{end}}</div>
+      <div class="stat-value"><span id="d-online">{{.Stats.DevicesOnline}}</span> <span class="stat-of">/ <span id="d-total">{{.Stats.DevicesTotal}}</span></span></div>
+      <div class="stat-sub"><span id="d-offline">{{.Stats.DevicesOffline}}</span> оффлайн</div>
+    </a>
+    <a href="/devices?alerts=1" class="stat-card" title="Показать проблемные устройства">
+      <div class="stat-top"><div class="stat-ic ic-amber">⚠️</div><div class="stat-label">Предупреждения</div></div>
+      <div class="stat-value {{if .Stats.AlertsTotal}}text-red{{end}}" id="d-alerts">{{.Stats.AlertsTotal}}</div>
+      <div class="stat-sub">offline, ресурс или heartbeat</div>
+    </a>
+    <div class="stat-card">
+      <div class="stat-top"><div class="stat-ic ic-green">👥</div><div class="stat-label">Пользователи</div></div>
+      <div class="stat-value">{{.Stats.UsersTotal}}</div>
+      <div class="stat-sub">{{.Stats.UsersActive}} активных</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-top"><div class="stat-ic ic-violet">💓</div><div class="stat-label">Последний heartbeat</div></div>
+      <div class="stat-value sm">{{.LastHeartbeat}}</div>
+      <div class="stat-sub">обновление от агентов</div>
+    </div>
+  </div>
+
+  <div class="dash-row">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Нагрузка по парку устройств</span>
+        <div class="range" id="range">
+          <button data-h="6">6ч</button><button data-h="24" class="on">24ч</button><button data-h="168">7д</button><button data-h="720">30д</button>
+        </div>
+      </div>
+      <div class="tabs" id="tabs">
+        <button data-m="cpu" class="on">CPU</button><button data-m="ram">RAM</button><button data-m="disk">Disk</button>
+      </div>
+      <canvas id="trends" class="chart-canvas"></canvas>
+      <div id="trends-empty" class="empty" style="display:none">Нет данных о нагрузке за период.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Статус устройств</span></div>
+      {{if .Stats.DevicesTotal}}
+      <div class="donut-wrap">
+        <div class="donut" id="d-donut" style="background:{{.Donut.Gradient}}">
+          <div class="donut-center"><div class="num" id="d-donut-pct">{{.Stats.DevicesOnlinePct}}%</div><div class="lbl">онлайн</div></div>
+        </div>
+        <div class="legend">
+          <a class="legend-item" href="/devices?status=online"><span class="legend-dot" style="background:var(--green)"></span><span class="lg-name">Онлайн</span><span class="lg-num" id="d-lg-on">{{.Donut.Online}}</span><span class="lg-pct" id="d-lg-on-pct">{{.Donut.OnlinePct}}%</span></a>
+          <a class="legend-item" href="/devices?status=offline"><span class="legend-dot" style="background:var(--red)"></span><span class="lg-name">Оффлайн</span><span class="lg-num" id="d-lg-off">{{.Donut.Offline}}</span><span class="lg-pct" id="d-lg-off-pct">{{.Donut.OfflinePct}}%</span></a>
+          <a class="legend-item" href="/devices?status=unknown"><span class="legend-dot" style="background:#cdd6e4"></span><span class="lg-name">Неизвестно</span><span class="lg-num" id="d-lg-unk">{{.Donut.Unknown}}</span><span class="lg-pct" id="d-lg-unk-pct">{{.Donut.UnknownPct}}%</span></a>
+        </div>
+      </div>
+      {{else}}<div class="empty">Устройств пока нет.</div>{{end}}
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Топ нагруженных</span></div>
+      {{if .TopDevices}}
+      {{range .TopDevices}}
+      <div class="bar-row">
+        <div class="bar-head"><span class="host">{{.Hostname}}</span><span class="val">CPU {{.CPU}}%</span></div>
+        <div class="bar-track"><div class="bar-fill {{.Class}}" style="width:{{.CPU}}%"></div></div>
+      </div>
+      {{end}}
+      {{else}}<div class="empty">Нет данных о нагрузке.</div>{{end}}
+    </div>
+  </div>
+
+  <div class="dash-row" style="grid-template-columns:1fr;margin-top:16px">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Активность действий</span></div>
+      {{range .Activity}}
+      <div class="act">
+        <div class="act-ic">{{actionIcon .Action}}</div>
+        <div class="act-time">{{.CreatedAt}}</div>
+        <div class="act-text">{{.Action}}{{if .Target}} · {{.Target}}{{end}} <span class="text-muted" style="font-size:12px">({{.Username}})</span></div>
+        <div class="act-cat">{{actionCat .Action}}</div>
+      </div>
+      {{else}}
+      <div class="empty">Действий пока нет.</div>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+const COLORS = { cpu:'#2f6bed', ram:'#18a058', disk:'#f08c00' };
+let state = { hours:24, metric:'cpu' }, lastPoints = [];
+
+document.getElementById('range').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-h]'); if(!b) return;
+  state.hours = +b.dataset.h;
+  document.querySelectorAll('#range button').forEach(x=>x.classList.toggle('on', x===b));
+  loadCharts();
+});
+document.getElementById('tabs').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-m]'); if(!b) return;
+  state.metric = b.dataset.m;
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
+  drawTrends(document.getElementById('trends'), lastPoints, state.metric);
+});
+
+function fmtTs(ts){ return (ts||'').slice(5,16); }
+
+async function loadCharts(){
+  try{
+    const m = await (await fetch(`/api/metrics/fleet?hours=${state.hours}`)).json();
+    lastPoints = m.points||[];
+    drawTrends(document.getElementById('trends'), lastPoints, state.metric);
+  }catch(e){}
+}
+
+function drawTrends(canvas, points, primary){
+  const empty = document.getElementById('trends-empty');
+  if(!points.length){ canvas.style.display='none'; empty.style.display='block'; return; }
+  canvas.style.display='block'; empty.style.display='none';
+  const dpr = window.devicePixelRatio||1, w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width=w*dpr; canvas.height=h*dpr;
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+  const padL=34,padR=10,padT=10,padB=22, plotW=w-padL-padR, plotH=h-padT-padB;
+  const yOf=v=>padT+plotH*(1-v/100), xOf=i=>padL+(points.length===1?plotW/2:plotW*i/(points.length-1));
+  const css=getComputedStyle(document.documentElement);
+  ctx.strokeStyle=css.getPropertyValue('--border').trim(); ctx.fillStyle=css.getPropertyValue('--muted').trim();
+  ctx.font='11px sans-serif'; ctx.lineWidth=1; ctx.textAlign='right'; ctx.textBaseline='middle';
+  for(let v=0;v<=100;v+=25){const y=yOf(v);ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(w-padR,y);ctx.stroke();ctx.fillText(v+'%',padL-6,y);}
+  ctx.textBaseline='top'; ctx.textAlign='left'; ctx.fillText(fmtTs(points[0].ts),padL,h-padB+5);
+  if(points.length>1){ctx.textAlign='right';ctx.fillText(fmtTs(points[points.length-1].ts),w-padR,h-padB+5);}
+  const order = ['cpu','ram','disk'].sort((a,b)=> a===primary?1:(b===primary?-1:0)); // primary last (on top)
+  for(const k of order){
+    const isP = k===primary;
+    if(isP){ // заливка под основной линией
+      ctx.beginPath(); let st=false;
+      points.forEach((p,i)=>{const v=p[k]; if(v==null){return;} const x=xOf(i),y=yOf(v); st?ctx.lineTo(x,y):(ctx.moveTo(x,y),st=true);});
+      ctx.lineTo(xOf(points.length-1), yOf(0)); ctx.lineTo(xOf(0), yOf(0)); ctx.closePath();
+      ctx.fillStyle = COLORS[k]+'1f'; ctx.fill();
+    }
+    ctx.strokeStyle=COLORS[k]; ctx.globalAlpha = isP?1:0.45; ctx.lineWidth = isP?2.2:1.2; ctx.beginPath();
+    let st=false;
+    points.forEach((p,i)=>{const v=p[k]; if(v==null){st=false;return;} const x=xOf(i),y=yOf(v); st?ctx.lineTo(x,y):(ctx.moveTo(x,y),st=true);});
+    ctx.stroke(); ctx.globalAlpha=1;
+  }
+}
+loadCharts();
+
+// ── авто-обновление статусов парка (без перезагрузки) ──
+function dPct(part, total){ return total ? Math.round(part*100/total) : 0; }
+async function refreshDashboard(){
+  if(document.hidden) return;
+  let d;
+  try{ d = await (await fetch('/api/devices/status')).json(); }catch(e){ return; }
+  const s = d.summary || {}; const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+  const total=s.total||0, online=s.online||0, offline=s.offline||0, unknown=s.unknown||0;
+  set('d-online', online); set('d-total', total); set('d-offline', offline);
+  set('d-alerts', s.alerts||0);
+  const onPct=dPct(online,total);
+  set('d-onpct', onPct+'%'); set('d-donut-pct', onPct+'%');
+  set('d-lg-on', online);   set('d-lg-on-pct', onPct+'%');
+  set('d-lg-off', offline); set('d-lg-off-pct', dPct(offline,total)+'%');
+  set('d-lg-unk', unknown); set('d-lg-unk-pct', dPct(unknown,total)+'%');
+  const donut = document.getElementById('d-donut');
+  if(donut && total){
+    const on=online/total*100, off=on+offline/total*100;
+    donut.style.background = `conic-gradient(#18a058 0 ${on.toFixed(1)}%, #e5484d ${on.toFixed(1)}% ${off.toFixed(1)}%, #cdd6e4 ${off.toFixed(1)}% 100%)`;
+  }
+}
+setInterval(refreshDashboard, 20000);
+</script>
+{{end}}

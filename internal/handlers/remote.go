@@ -1,0 +1,161 @@
+package handlers
+
+import (
+	"encoding/hex"
+	"fmt"
+	"net"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"netadmin/internal/auth"
+)
+
+// powerLabels — человекочитаемые подписи действий питания.
+var powerLabels = map[string]string{
+	"reboot":   "Перезагрузка",
+	"shutdown": "Выключение",
+	"logoff":   "Выход из сессии",
+	"wol":      "Включение (Wake-on-LAN)",
+}
+
+// DevicePower — POST /devices/{id}/power : удалённое питание устройства (CanWrite).
+// reboot/shutdown/logoff ставятся в очередь агенту; wol шлётся сразу magic-пакетом.
+func (a *App) DevicePower(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if !user.CanWrite() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	action := strings.TrimSpace(r.FormValue("action"))
+	label, ok := powerLabels[action]
+	if !ok {
+		writeJSON(w, map[string]any{"ok": false, "error": "неизвестное действие"})
+		return
+	}
+
+	var hostname, mac, token string
+	var hasToken bool
+	if a.DB.QueryRow(`SELECT COALESCE(hostname,''), COALESCE(mac_address,''), COALESCE(agent_token,'')
+		FROM devices WHERE id=?`, id).Scan(&hostname, &mac, &token) != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": "устройство не найдено"})
+		return
+	}
+	hasToken = token != ""
+
+	if action == "wol" {
+		if mac == "" {
+			writeJSON(w, map[string]any{"ok": false, "error": "у устройства не задан MAC-адрес"})
+			return
+		}
+		if err := sendWOL(mac); err != nil {
+			writeJSON(w, map[string]any{"ok": false, "error": "ошибка отправки: " + err.Error()})
+			return
+		}
+		auth.LogAction(a.DB, user.ID, "device_wol", hostname, mac)
+		writeJSON(w, map[string]any{"ok": true, "message": "Magic-пакет отправлен на " + mac})
+		return
+	}
+
+	// reboot/shutdown/logoff — задача агенту
+	if !hasToken {
+		writeJSON(w, map[string]any{"ok": false, "error": "на устройстве не установлен агент — действие невозможно"})
+		return
+	}
+	if _, err := a.enqueueTask(id, action, "", label, user.ID); err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": "не удалось поставить задачу"})
+		return
+	}
+	auth.LogAction(a.DB, user.ID, "device_power", hostname, action)
+	writeJSON(w, map[string]any{"ok": true, "message": label + ": задача поставлена, агент выполнит в течение минуты"})
+}
+
+var macClean = regexp.MustCompile(`[^0-9a-fA-F]`)
+
+// buildMagicPacket собирает Wake-on-LAN magic-пакет: 6×0xFF + 16×MAC (102 байта).
+func buildMagicPacket(mac string) ([]byte, error) {
+	hexStr := macClean.ReplaceAllString(mac, "")
+	if len(hexStr) != 12 {
+		return nil, fmt.Errorf("некорректный MAC")
+	}
+	hw, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, err
+	}
+	packet := make([]byte, 0, 102)
+	for i := 0; i < 6; i++ {
+		packet = append(packet, 0xFF)
+	}
+	for i := 0; i < 16; i++ {
+		packet = append(packet, hw...)
+	}
+	return packet, nil
+}
+
+// sendWOL шлёт magic-пакет Wake-on-LAN на широковещательный адрес (UDP 9).
+func sendWOL(mac string) error {
+	packet, err := buildMagicPacket(mac)
+	if err != nil {
+		return err
+	}
+	conn, err := net.Dial("udp", "255.255.255.255:9")
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_, err = conn.Write(packet)
+	return err
+}
+
+// DeviceRDP — GET /devices/{id}/rdp : выдаёт .rdp-файл для подключения к рабочему столу.
+func (a *App) DeviceRDP(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if !user.CanWrite() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	var hostname, ip string
+	if a.DB.QueryRow("SELECT COALESCE(hostname,''), COALESCE(ip_address,'') FROM devices WHERE id=?", id).
+		Scan(&hostname, &ip) != nil {
+		http.NotFound(w, r)
+		return
+	}
+	target := ip
+	if target == "" {
+		target = hostname
+	}
+	if target == "" {
+		http.Error(w, "у устройства нет IP/имени", http.StatusBadRequest)
+		return
+	}
+	auth.LogAction(a.DB, user.ID, "device_rdp", hostname, target)
+
+	fname := hostname
+	if fname == "" {
+		fname = target
+	}
+	rdp := "full address:s:" + target + "\r\n" +
+		"prompt for credentials:i:1\r\n" +
+		"administrative session:i:0\r\n" +
+		"screen mode id:i:2\r\n"
+	w.Header().Set("Content-Type", "application/x-rdp")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeFilename(fname)+`.rdp"`)
+	_, _ = w.Write([]byte(rdp))
+}
+
+// sanitizeFilename убирает из имени файла небезопасные символы.
+func sanitizeFilename(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(`\/:*?"<>|`, r) {
+			return '_'
+		}
+		return r
+	}, s)
+	if s == "" {
+		return "device"
+	}
+	return s
+}

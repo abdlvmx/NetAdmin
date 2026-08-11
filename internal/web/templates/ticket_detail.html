@@ -1,0 +1,131 @@
+{{define "title"}}Заявка {{.T.Code}}{{end}}
+
+{{define "extra_head"}}
+<style>
+  .tk-grid { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+  @media (max-width: 900px){ .tk-grid { grid-template-columns: 1fr; } }
+  .tk-desc { white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+  .msg { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .msg.internal { background: var(--amber-soft); border-color: rgba(240,167,58,.3); }
+  .msg .who { font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .msg .who b { color: var(--text); }
+  .msg .body { font-size: 14px; white-space: pre-wrap; line-height: 1.55; }
+  .kv { font-size: 13px; line-height: 1.9; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-weight: 600; }
+  .status-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .status-actions form { margin: 0; }
+  .side-card { margin-bottom: 16px; }
+  .side-card h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 12px; }
+  .ck { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); cursor:pointer; margin-top:8px; }
+  .ck input { width:auto; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>{{.T.Title}} <span class="badge {{statusBadge .T.Status}}">{{statusRu .T.Status}}</span></h1>
+    <div class="sub"><a href="/tickets" style="color:var(--accent)">← Все заявки</a> · код <b>{{.T.Code}}</b> · создана {{.T.Created}}</div>
+  </div>
+</div>
+
+<div class="content">
+  <div class="tk-grid">
+    <!-- ОСНОВНОЕ -->
+    <div>
+      <div class="card">
+        <div class="card-title" style="margin-bottom:12px">Описание</div>
+        <div class="tk-desc">{{if .T.Description}}{{.T.Description}}{{else}}<span class="text-muted">—</span>{{end}}</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:14px">Переписка</div>
+        {{range .Comments}}
+        <div class="msg{{if .Internal}} internal{{end}}">
+          <div class="who"><b>{{.Author}}</b> · {{.Created}}{{if .Internal}} · 🔒 внутренняя заметка{{end}}</div>
+          <div class="body">{{.Body}}</div>
+        </div>
+        {{else}}
+        <div class="empty">Сообщений пока нет.</div>
+        {{end}}
+
+        {{if .User.CanWrite}}
+        <form method="post" action="/tickets/{{.T.ID}}/comment" style="margin-top:14px">
+          <textarea name="body" placeholder="Ответ заявителю или внутренняя заметка…" style="width:100%;min-height:90px;padding:11px 13px;border:1px solid var(--border-2);border-radius:11px;background:var(--surface);color:var(--text);font-family:inherit;font-size:14px;resize:vertical"></textarea>
+          <label class="ck"><input type="checkbox" name="internal" value="1"> Внутренняя заметка (не видна заявителю, без письма)</label>
+          <button class="btn btn-primary" type="submit" style="margin-top:10px">Добавить</button>
+        </form>
+        {{end}}
+      </div>
+    </div>
+
+    <!-- ПАНЕЛЬ -->
+    <div>
+      {{if .User.CanWrite}}
+      <div class="card side-card">
+        <h3>Статус</h3>
+        <div class="status-actions">
+          <form method="post" action="/tickets/{{.T.ID}}/status"><input type="hidden" name="status" value="in_progress"><button class="btn btn-ghost" type="submit">В работу</button></form>
+          <form method="post" action="/tickets/{{.T.ID}}/status"><input type="hidden" name="status" value="resolved"><button class="btn btn-ghost" type="submit">Решена</button></form>
+          <form method="post" action="/tickets/{{.T.ID}}/status"><input type="hidden" name="status" value="closed"><button class="btn btn-ghost" type="submit">Закрыть</button></form>
+          <form method="post" action="/tickets/{{.T.ID}}/status"><input type="hidden" name="status" value="new"><button class="btn btn-ghost" type="submit">Вернуть в новые</button></form>
+        </div>
+      </div>
+
+      <div class="card side-card">
+        <h3>Параметры</h3>
+        <form method="post" action="/tickets/{{.T.ID}}/update">
+          <div class="form-group"><label>Исполнитель</label>
+            <select name="assignee_id">
+              <option value="">— не назначен —</option>
+              {{range .Staff}}<option value="{{.ID}}"{{if eq .ID $.T.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+          </div>
+          <div class="form-group"><label>Приоритет</label>
+            <select name="priority">
+              <option value="low"{{if eq .T.Priority "low"}} selected{{end}}>Низкий</option>
+              <option value="normal"{{if eq .T.Priority "normal"}} selected{{end}}>Обычный</option>
+              <option value="high"{{if eq .T.Priority "high"}} selected{{end}}>Высокий</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Категория</label>
+            <input name="category" value="{{.T.Category}}" placeholder="Категория">
+          </div>
+          <div class="form-group"><label>Кабинет</label>
+            <input name="location" value="{{.T.Location}}" placeholder="Кабинет / расположение">
+          </div>
+          <div class="form-group"><label>Связанное устройство</label>
+            <select name="device_id">
+              <option value="">— не привязано —</option>
+              {{range .Devices}}<option value="{{.ID}}"{{if eq .ID $.T.DeviceID}} selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%">Сохранить</button>
+        </form>
+      </div>
+      {{else}}
+      <div class="card side-card">
+        <h3>Статус</h3>
+        <span class="badge {{statusBadge .T.Status}}">{{statusRu .T.Status}}</span>
+      </div>
+      {{end}}
+
+      <div class="card side-card">
+        <h3>Заявитель</h3>
+        <div class="kv">
+          <div><span class="k">ФИО:</span> <span class="v">{{.T.ReporterName}}</span></div>
+          {{if .T.EmployeeName}}<div><span class="k">В справочнике:</span> <span class="v">{{.T.EmployeeName}}</span></div>{{end}}
+          {{if .T.ReporterMail}}<div><span class="k">Email:</span> <span class="v">{{.T.ReporterMail}}</span></div>{{end}}
+          {{if .T.ReporterTel}}<div><span class="k">Телефон:</span> <span class="v">{{.T.ReporterTel}}</span></div>{{end}}
+          {{if .T.Location}}<div><span class="k">Кабинет:</span> <span class="v">{{.T.Location}}</span></div>{{end}}
+          <div><span class="k">Приоритет:</span> <span class="v">{{prioRu .T.Priority}}</span></div>
+          {{if .T.DeviceName}}<div><span class="k">Устройство:</span> <span class="v"><a href="/devices/{{.T.DeviceID}}" style="color:var(--accent)">{{.T.DeviceName}}</a></span></div>{{end}}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

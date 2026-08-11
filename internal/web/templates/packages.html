@@ -1,0 +1,122 @@
+{{define "title"}}Установка ПО{{end}}
+
+{{define "extra_head"}}
+<style>
+  .pk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 900px){ .pk-grid { grid-template-columns: 1fr; } }
+  .dev-list { max-height: 220px; overflow:auto; border:1px solid var(--border); border-radius:11px; padding:10px 12px; }
+  .dev-list label { display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--text); padding:3px 0; cursor:pointer; }
+  .dev-list input { width:auto; }
+  .form-group { margin-bottom: 13px; }
+  .form-group label { display:block; font-size:12px; color:var(--muted); margin-bottom:5px; }
+  .form-group input, .form-group select { width:100%; padding:10px 12px; border:1px solid var(--border-2); border-radius:10px; background:var(--surface); color:var(--text); font-size:14px; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Установка ПО</h1>
+    <div class="sub">Раздача дистрибутивов на ПК с агентом · тихая установка · проверка целостности по SHA-256</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  {{if .Msg}}<div class="banner ok">{{.Msg}}</div>{{end}}
+  {{if .Err}}<div class="banner err">{{.Err}}</div>{{end}}
+
+  {{if eq .User.Role "admin"}}
+  <div class="pk-grid" style="margin-bottom:18px">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Загрузить дистрибутив</span></div>
+      <form method="post" action="/packages/upload" enctype="multipart/form-data" style="padding:14px 18px">
+        <div class="form-group"><label>Файл (.msi / .exe / .ps1 / .bat)</label><input type="file" name="file" required></div>
+        <div class="form-group"><label>Название</label><input type="text" name="name" placeholder="напр. 7-Zip 24.08"></div>
+        <div class="form-group"><label>Аргументы тихой установки <span style="font-weight:400">(необязательно)</span></label>
+          <input type="text" name="install_args" placeholder="EXE: /S или /silent · MSI ставится /quiet автоматически"></div>
+        <button class="btn btn-primary" type="submit">Загрузить</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Раздать установку</span></div>
+      <form method="post" action="/packages/deploy" style="padding:14px 18px">
+        <div class="form-group"><label>Дистрибутив</label>
+          <select name="package_id" required>
+            <option value="">— выберите —</option>
+            {{range .Packages}}<option value="{{.ID}}">{{.Name}} ({{.Kind}}, {{.SizeMB}})</option>{{end}}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Где установить</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:8px;cursor:pointer">
+            <input type="checkbox" name="all" value="1" style="width:auto" onchange="document.getElementById('pk-dev-list').style.display=this.checked?'none':'block'"> Все ПК с агентом ({{len .Devices}})
+          </label>
+          <div class="dev-list" id="pk-dev-list">
+            {{range .Devices}}<label><input type="checkbox" name="device" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="text-muted">Нет ПК с агентом.</span>{{end}}
+          </div>
+        </div>
+        <button class="btn btn-primary" type="submit" onclick="return confirm('Раздать установку на выбранные ПК?')">Установить</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><span class="card-title">Дистрибутивы</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-sort>Название</th><th>Файл</th><th style="width:70px">Тип</th><th data-sort style="width:90px">Размер</th><th>Аргументы</th><th data-sort style="width:140px">Загружен</th><th style="width:90px"></th></tr></thead>
+        <tbody>
+          {{range .Packages}}
+          <tr>
+            <td><b>{{.Name}}</b></td>
+            <td class="text-muted" style="word-break:break-all">{{.Original}}</td>
+            <td class="text-muted">{{.Kind}}</td>
+            <td class="text-muted">{{.SizeMB}}</td>
+            <td class="text-muted">{{if .Args}}{{.Args}}{{else}}—{{end}}</td>
+            <td class="text-muted" style="white-space:nowrap">{{.Created}}</td>
+            <td><form method="post" action="/packages/{{.ID}}/delete" onsubmit="return confirm('Удалить дистрибутив?')"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
+          </tr>
+          {{else}}
+          <tr><td colspan="7" class="empty">Дистрибутивов нет. Загрузите .msi/.exe/скрипт для раздачи на ПК.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+
+  <div class="toolbar">
+    <input type="text" placeholder="Поиск: ПК, дистрибутив…" data-filter-target="#dep-body">
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">История установок</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-sort style="width:150px">Время</th><th data-sort>Устройство</th><th data-sort>Дистрибутив</th><th data-sort style="width:120px">Статус</th><th>Результат</th></tr></thead>
+        <tbody id="dep-body">
+          {{range .Recent}}
+          <tr>
+            <td class="text-muted" style="white-space:nowrap">{{.Created}}</td>
+            <td>{{.Device}}</td>
+            <td>{{.Package}}</td>
+            <td>
+              {{if eq .Status "done"}}<span class="badge badge-green">установлено</span>
+              {{else if eq .Status "failed"}}<span class="badge badge-red">ошибка</span>
+              {{else if eq .Status "sent"}}<span class="badge badge-accent">устанавливается</span>
+              {{else}}<span class="badge badge-amber">в очереди</span>{{end}}
+            </td>
+            <td class="text-muted" style="word-break:break-word">{{if .Result}}{{.Result}}{{else}}—{{end}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="empty">Установок ещё не было.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

@@ -1,0 +1,102 @@
+{{define "title"}}Лицензии ПО{{end}}
+
+{{define "extra_head"}}
+<style>
+  .lic-add { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .lic-add .fld { display: flex; flex-direction: column; gap: 4px; }
+  .lic-add label { font-size: 12px; color: var(--muted); }
+  .lic-edit { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .lic-edit input { width: 78px; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Лицензии ПО</h1>
+    <div class="sub">Учёт: куплено мест против фактического использования по инвентарю</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  {{if .Msg}}<div class="banner">{{.Msg}}</div>{{end}}
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="lbl">Позиций</div><div class="num">{{len .Rows}}</div></div>
+    <div class="summary-card"><div class="lbl">С перерасходом</div><div class="num {{if .OverCount}}text-red{{end}}">{{.OverCount}}</div></div>
+    <div class="summary-card"><div class="lbl">Перерасход мест</div><div class="num {{if .TotalOver}}text-red{{end}}">{{.TotalOver}}</div></div>
+    <div class="summary-card"><div class="lbl">Сумма закупок</div><div class="num">{{printf "%.0f" .TotalCost}} ₽</div></div>
+  </div>
+
+  {{if eq .User.Role "admin"}}
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><span class="card-title">Добавить лицензию</span></div>
+    <div style="padding:14px 18px">
+      <form method="post" action="/licenses/add" class="lic-add">
+        <div class="fld" style="flex:1;min-width:200px"><label>Название ПО (для сопоставления)</label>
+          <input name="name" placeholder="напр. Microsoft Office" required></div>
+        <div class="fld"><label>Вендор</label><input name="vendor" placeholder="Microsoft" style="min-width:140px"></div>
+        <div class="fld"><label>Куплено мест</label><input name="seats_purchased" type="number" value="0" style="width:120px"></div>
+        <div class="fld"><label>Стоимость, ₽</label><input name="cost" type="number" step="0.01" value="0" style="width:130px"></div>
+        <button class="btn btn-primary">Добавить</button>
+      </form>
+      <div class="text-muted" style="font-size:12px;margin-top:8px">«Используется» считается по инвентарю ПО: число устройств, где имя содержит указанную подстроку.</div>
+    </div>
+  </div>
+  {{end}}
+
+  <div class="toolbar">
+    <input type="text" id="lic-search" placeholder="Поиск по названию / вендору…" data-filter-target="#lic-body">
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Лицензии</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort>ПО</th>
+            <th data-sort style="width:110px">Куплено</th>
+            <th data-sort style="width:120px">Используется</th>
+            <th data-sort style="width:120px">Перерасход</th>
+            <th style="width:130px">Стоимость</th>
+            {{if eq .User.Role "admin"}}<th style="width:90px"></th>{{end}}
+          </tr>
+        </thead>
+        <tbody id="lic-body">
+          {{range .Rows}}
+          <tr>
+            <td><b>{{.Name}}</b>{{if .Vendor}}<div class="text-muted" style="font-size:11.5px">{{.Vendor}}</div>{{end}}</td>
+            {{if eq $.User.Role "admin"}}
+            <td>
+              <form method="post" action="/licenses/{{.ID}}/update" class="lic-edit">
+                <input name="seats_purchased" type="number" value="{{.Purchased}}">
+                <input name="cost" type="hidden" value="{{.Cost}}">
+                <button class="btn btn-ghost btn-sm" title="Сохранить">💾</button>
+              </form>
+            </td>
+            {{else}}
+            <td>{{.Purchased}}</td>
+            {{end}}
+            <td><b>{{.Used}}</b></td>
+            <td>{{if .Over}}<span class="badge badge-red">+{{.Over}}</span>{{else}}<span class="text-muted">в норме</span>{{end}}</td>
+            <td class="text-muted">{{printf "%.0f" .Cost}} ₽</td>
+            {{if eq $.User.Role "admin"}}
+            <td>
+              <form method="post" action="/licenses/{{.ID}}/delete" onsubmit="return confirm('Удалить лицензию «{{.Name}}»?')">
+                <button class="btn btn-ghost btn-sm">Удалить</button>
+              </form>
+            </td>
+            {{end}}
+          </tr>
+          {{else}}
+          <tr><td colspan="6" class="empty">Лицензий пока нет. Добавьте позицию для учёта закупленных мест.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

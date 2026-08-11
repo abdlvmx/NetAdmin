@@ -1,0 +1,70 @@
+{{define "title"}}Заявки{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Заявки (HelpDesk)</h1>
+    <div class="sub">Обращения сотрудников через портал <a href="/help" target="_blank" style="color:var(--accent)">/help</a></div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  <div class="summary-grid">
+    <div class="summary-card"><div class="lbl">Новые</div><div class="num {{if .New}}text-amber{{end}}">{{.New}}</div></div>
+    <div class="summary-card"><div class="lbl">В работе</div><div class="num">{{.InProgress}}</div></div>
+    <div class="summary-card"><div class="lbl">Открытые</div><div class="num {{if .Open}}text-red{{end}}">{{.Open}}</div></div>
+    <div class="summary-card"><div class="lbl">Всего</div><div class="num">{{.Total}}</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Список заявок</span>
+      <div style="margin-left:auto;display:flex;gap:10px;flex-wrap:wrap">
+        <select data-filter-target="#tk-body" data-col="status" style="padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-size:13px">
+          <option value="all">Все статусы</option>
+          <option value="new">Новые</option>
+          <option value="in_progress">В работе</option>
+          <option value="resolved">Решённые</option>
+          <option value="closed">Закрытые</option>
+        </select>
+        <input type="search" data-filter-target="#tk-body" placeholder="Поиск…" style="min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-size:13px">
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th data-sort style="width:90px">Код</th>
+          <th data-sort>Тема</th>
+          <th data-sort style="width:110px">Статус</th>
+          <th data-sort style="width:100px">Приоритет</th>
+          <th data-sort style="width:150px">Категория</th>
+          <th data-sort>Заявитель</th>
+          <th data-sort style="width:120px">Кабинет</th>
+          <th data-sort style="width:150px">Исполнитель</th>
+          <th data-sort style="width:140px">Создана</th>
+        </tr></thead>
+        <tbody id="tk-body">
+          {{range .Rows}}
+          <tr data-status="{{.Status}}" onclick="location.href='/tickets/{{.ID}}'" style="cursor:pointer">
+            <td><b>{{.Code}}</b></td>
+            <td>{{.Title}}</td>
+            <td><span class="badge {{statusBadge .Status}}">{{statusRu .Status}}</span></td>
+            <td>{{if eq .Priority "high"}}<span class="badge badge-red">Высокий</span>{{else if eq .Priority "low"}}<span class="text-muted">Низкий</span>{{else}}<span class="text-muted">Обычный</span>{{end}}</td>
+            <td class="text-muted">{{if .Category}}{{.Category}}{{else}}—{{end}}</td>
+            <td>{{.Reporter}}</td>
+            <td class="text-muted">{{if .Location}}{{.Location}}{{else}}—{{end}}</td>
+            <td class="text-muted">{{if .Assignee}}{{.Assignee}}{{else}}—{{end}}</td>
+            <td class="text-muted" style="white-space:nowrap">{{.Created}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="9" class="empty">Заявок пока нет. Сотрудники могут оставить заявку на портале <a href="/help">/help</a>.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

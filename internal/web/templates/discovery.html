@@ -1,0 +1,82 @@
+{{define "title"}}Обнаружение{{end}}
+
+{{define "extra_head"}}
+<style>
+  .disc-act { display: flex; gap: 5px; flex-wrap: wrap; }
+  .disc-act form { display: inline; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Обнаружение устройств</h1>
+    <div class="sub">Пассивно из ARP-кэша сети · без активного сканирования</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  {{if .Msg}}<div class="banner">{{.Msg}}</div>{{end}}
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="lbl">Новые (требуют решения)</div><div class="num {{if .New}}text-red{{end}}">{{.New}}</div></div>
+    <div class="summary-card"><div class="lbl">Всего в очереди</div><div class="num">{{.Total}}</div></div>
+  </div>
+
+  <div class="toolbar">
+    <input type="text" id="disc-search" placeholder="Поиск: IP, MAC, имя, вендор…" data-filter-target="#disc-body">
+    <select data-filter-target="#disc-body" data-col="status">
+      <option value="">Все статусы</option>
+      <option value="new">Новые</option>
+      <option value="added">Добавленные</option>
+      <option value="guest">Гостевые</option>
+      <option value="ignored">Игнорированные</option>
+    </select>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Обнаруженные хосты</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort style="width:130px">IP</th>
+            <th>Устройство</th>
+            <th style="width:160px">MAC</th>
+            <th data-sort style="width:140px">Обнаружено</th>
+            <th style="width:240px">Статус / действие</th>
+          </tr>
+        </thead>
+        <tbody id="disc-body">
+          {{range .Rows}}
+          <tr data-status="{{.Status}}">
+            <td><b>{{if .IP}}{{.IP}}{{else}}—{{end}}</b></td>
+            <td>{{if .Hostname}}{{.Hostname}}{{else}}<span class="text-muted">без имени</span>{{end}}
+              {{if .Vendor}}<div class="text-muted" style="font-size:11.5px">{{.Vendor}}</div>{{end}}</td>
+            <td class="text-muted" style="word-break:break-all">{{.MAC}}</td>
+            <td class="text-muted" style="white-space:nowrap">{{.FirstSeen}}</td>
+            <td>
+              {{if eq .Status "new"}}
+                {{if $.User.CanWrite}}
+                <div class="disc-act">
+                  <form method="post" action="/discovery/{{.ID}}/action"><input type="hidden" name="action" value="add"><button class="btn btn-primary btn-sm">Добавить</button></form>
+                  <form method="post" action="/discovery/{{.ID}}/action"><input type="hidden" name="action" value="guest"><button class="btn btn-ghost btn-sm">Гость</button></form>
+                  <form method="post" action="/discovery/{{.ID}}/action"><input type="hidden" name="action" value="ignore"><button class="btn btn-ghost btn-sm">Игнор</button></form>
+                </div>
+                {{else}}<span class="badge badge-amber">новое</span>{{end}}
+              {{else if eq .Status "added"}}<span class="badge badge-green">добавлено</span>
+              {{else if eq .Status "guest"}}<span class="badge badge-accent">гостевое</span>
+              {{else}}<span class="badge badge-gray">игнор</span>{{end}}
+            </td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="empty">Пока ничего не обнаружено. Новые хосты появятся по мере трафика в сети (ARP-кэш обновляется фоном).</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

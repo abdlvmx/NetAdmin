@@ -1,0 +1,422 @@
+{{define "title"}}{{.Device.Hostname}}{{end}}
+
+{{define "extra_head"}}
+<style>
+  .dd-sub a { color: var(--accent); text-decoration: none; }
+  .dd-sub a:hover { text-decoration: underline; }
+  .hdr-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .hdr-actions form { margin: 0; }
+  .tabs2 { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tabs2 button { border: none; background: none; padding: 10px 16px; font-size: 13.5px; font-weight: 650;
+    color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .12s; }
+  .tabs2 button:hover { color: var(--text); }
+  .tabs2 button.on { color: var(--accent); border-bottom-color: var(--accent); }
+  .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px 30px; }
+  .info-item .k { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .info-item .v { font-size: 14px; font-weight: 600; word-break: break-word; }
+  .sec-title { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .04em; margin: 22px 0 12px; }
+  .dd-search { min-width: 200px; flex: 0 1 300px; padding: 8px 12px; border: 1px solid var(--border);
+    border-radius: 10px; background: var(--bg); color: var(--text); font-size: 13px; }
+  .dd-search:focus { outline: none; border-color: var(--accent); }
+  .pane-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .pane-head .count-badge { font-size: 12px; font-weight: 650; color: var(--accent);
+    background: var(--accent-soft); padding: 2px 9px; border-radius: 999px; }
+  .pane-head .dd-search { margin-left: auto; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>{{.Device.Hostname}}
+      <span id="dd-status">
+        {{if eq .Device.Status "online"}}<span class="badge badge-green">онлайн</span>
+        {{else if eq .Device.Status "offline"}}<span class="badge badge-red">оффлайн</span>
+        {{else}}<span class="badge badge-gray">неизвестно</span>{{end}}
+      </span>
+      {{if .Device.Critical}}<span class="badge badge-amber" title="критически важное устройство">★ критичное</span>{{end}}
+    </h1>
+    <div class="sub dd-sub"><a href="/devices">← Все устройства</a> · {{if .Device.IP}}{{.Device.IP}}{{else}}без IP{{end}}{{if .Device.DeviceType}} · {{.Device.DeviceType}}{{end}}</div>
+  </div>
+  {{if .User.CanWrite}}
+  <div class="hdr-actions">
+    {{if .Device.IP}}<button class="btn btn-ghost" onclick="ddPing()">Ping</button>
+    <button class="btn btn-ghost" onclick="ddScanPorts(this)">Скан портов</button>{{end}}
+    <button class="btn btn-ghost" onclick="ddPower('wol')" title="Wake-on-LAN">⏻ Включить</button>
+    <button class="btn btn-ghost" onclick="ddPower('reboot')">↻ Перезагрузить</button>
+    <button class="btn btn-ghost" onclick="ddPower('shutdown')">⏼ Выключить</button>
+    <button class="btn btn-ghost" onclick="ddPower('logoff')">⎋ Выйти</button>
+    {{if .Device.IP}}<a class="btn btn-ghost" href="/devices/{{.Device.ID}}/rdp" title="Скачать .rdp для подключения">🖥 RDP</a>{{end}}
+    <button class="btn btn-primary" onclick="openModal('modal-edit')">Изменить</button>
+    {{if eq .User.Role "admin"}}
+    {{if .Device.HasToken}}
+    <form method="post" action="/devices/{{.Device.ID}}/agent-token/revoke" onsubmit="return confirm('Сбросить токен агента? Агент перерегистрируется.')">
+      <input type="hidden" name="redirect" value="/devices/{{.Device.ID}}?message=Токен+сброшен">
+      <button class="btn btn-ghost" title="агент авторизован персональным токеном">🔑 Сбросить токен</button>
+    </form>
+    {{end}}
+    <form method="post" action="/devices/{{.Device.ID}}/delete" onsubmit="return confirm('Удалить устройство {{.Device.Hostname}}?')">
+      <button class="btn btn-ghost" style="color:var(--red)">Удалить</button>
+    </form>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+
+<div class="content">
+  <div class="tabs2" id="dd-tabs">
+    <button data-tab="overview" class="on">Обзор</button>
+    <button data-tab="metrics">Нагрузка</button>
+    <button data-tab="disks">Диски</button>
+    <button data-tab="software">ПО</button>
+    <button data-tab="services">Службы</button>
+    <button data-tab="autoruns">Автозагрузка</button>
+    <button data-tab="schtasks">Задачи</button>
+    <button data-tab="history">История</button>
+    <button data-tab="tasks">Действия</button>
+  </div>
+
+  <!-- ОБЗОР -->
+  <div class="tab-pane" id="pane-overview">
+    <div class="card">
+      <div class="sec-title" style="margin-top:0">Идентификация</div>
+      <div class="info-grid">
+        <div class="info-item"><div class="k">Имя хоста</div><div class="v">{{.Device.Hostname}}</div></div>
+        <div class="info-item"><div class="k">IP-адрес</div><div class="v">{{if .Device.IP}}{{.Device.IP}}{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">MAC-адрес</div><div class="v">{{if .Device.MAC}}{{.Device.MAC}}{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Тип</div><div class="v">{{if .Device.DeviceType}}{{.Device.DeviceType}}{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">ОС</div><div class="v">{{if .Device.OSType}}{{.Device.OSType}}{{else if .Device.OSGuess}}{{.Device.OSGuess}} <span class="text-muted" style="font-weight:400">(по TTL)</span>{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Владелец</div><div class="v">{{if .Device.EmployeeName}}{{.Device.EmployeeName}}{{else if .Device.OwnerName}}{{.Device.OwnerName}}{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Расположение</div><div class="v">{{if .Device.Location}}{{.Device.Location}}{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Агент</div><div class="v">{{if .Device.HasToken}}<span class="badge badge-green">✓ установлен</span>{{else}}<span class="text-muted">—</span>{{end}}</div></div>
+        <div class="info-item"><div class="k">Последний онлайн</div><div class="v" id="dd-seen">{{if .Device.LastSeen}}{{.Device.LastSeen}}{{else}}—{{end}}</div></div>
+      </div>
+
+      <div class="sec-title">Оборудование</div>
+      <div class="info-grid">
+        <div class="info-item"><div class="k">Процессор</div><div class="v">{{if .Device.CPUModel}}{{.Device.CPUModel}}{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Оперативная память</div><div class="v">{{if .Device.RAMTotalGB}}{{.Device.RAMTotalGB}} ГБ{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Диск</div><div class="v">{{if .Device.DiskTotalGB}}{{.Device.DiskTotalGB}} ГБ{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Версия ОС</div><div class="v">{{if .Device.OSVersion}}{{.Device.OSVersion}}{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Производитель / модель</div><div class="v">{{if or .Device.Manufacturer .Device.Model}}{{.Device.Manufacturer}} {{.Device.Model}}{{else}}—{{end}}</div></div>
+        <div class="info-item"><div class="k">Серийный №</div><div class="v">{{if .Device.SerialNumber}}{{.Device.SerialNumber}}{{else}}—{{end}}</div></div>
+      </div>
+
+      {{if .Device.OpenPorts}}
+      <div class="sec-title">Открытые порты</div>
+      <div>{{range .Device.OpenPorts}}{{if or (eq . 23) (eq . 445)}}<span class="badge badge-red" title="небезопасный порт">{{.}}</span>{{else}}<span class="badge badge-gray">{{.}}</span>{{end}} {{end}}</div>
+      {{end}}
+
+      {{if .Device.Notes}}
+      <div class="sec-title">Заметки</div>
+      <div style="white-space:pre-wrap">{{.Device.Notes}}</div>
+      {{end}}
+    </div>
+  </div>
+
+  <!-- НАГРУЗКА -->
+  <div class="tab-pane" id="pane-metrics" hidden>
+    <div class="card">
+      <div class="pane-head">
+        <span class="card-title">Нагрузка CPU / RAM / Disk</span>
+        <div class="range" id="dd-range" style="margin-left:auto">
+          <button data-h="6">6ч</button><button data-h="24" class="on">24ч</button><button data-h="168">7д</button><button data-h="720">30д</button>
+        </div>
+      </div>
+      <div class="chart-legend">
+        <span><i style="background:#0d9488"></i>CPU</span><span><i style="background:#7c3aed"></i>RAM</span><span><i style="background:#d97706"></i>Disk</span>
+      </div>
+      <canvas id="dd-canvas" class="chart-canvas"></canvas>
+      <div id="dd-canvas-empty" class="empty" style="display:none">Нет данных о нагрузке за период. Появятся после heartbeat агента.</div>
+    </div>
+  </div>
+
+  <!-- ДИСКИ -->
+  <div class="tab-pane" id="pane-disks" hidden>
+    <div class="card">
+      <div class="pane-head"><span class="card-title">Здоровье дисков (SMART)</span><span class="count-badge" id="disk-count"></span>
+        <input class="dd-search" id="disk-search" type="search" placeholder="Поиск по дискам…" oninput="ddFilter('disk-search','disk-body','disk-count')"></div>
+      <div class="table-wrap" style="max-height:64vh;overflow:auto">
+        <table><thead><tr><th>Модель</th><th style="width:70px">Тип</th><th style="width:90px">Объём</th><th style="width:80px">Износ</th><th style="width:80px">Темп.</th><th style="width:110px">Наработка</th><th style="width:230px">Состояние</th></tr></thead><tbody id="disk-body"></tbody></table>
+      </div>
+      <div id="disk-empty" class="empty" style="display:none">Нет данных. Появятся после сбора агентом (раз в 6 часов). SMART собирается на Windows-хостах с агентом.</div>
+    </div>
+  </div>
+
+  <!-- ПО -->
+  <div class="tab-pane" id="pane-software" hidden>
+    <div class="card">
+      <div class="pane-head"><span class="card-title">Установленное ПО</span><span class="count-badge" id="sw-count"></span>
+        <input class="dd-search" id="sw-search" type="search" placeholder="Поиск…" oninput="ddFilter('sw-search','sw-body','sw-count')"></div>
+      <div class="table-wrap" style="max-height:64vh;overflow:auto">
+        <table><thead><tr><th>Название</th><th style="width:150px">Версия</th><th style="width:130px">Установлено</th></tr></thead><tbody id="sw-body"></tbody></table>
+      </div>
+      <div id="sw-empty" class="empty" style="display:none">Нет данных. Появятся после сбора агентом (раз в сутки).</div>
+    </div>
+  </div>
+
+  <!-- СЛУЖБЫ -->
+  <div class="tab-pane" id="pane-services" hidden>
+    <div class="card">
+      <div class="pane-head"><span class="card-title">Службы Windows</span><span class="count-badge" id="svc-count"></span>
+        <input class="dd-search" id="svc-search" type="search" placeholder="Поиск по службам…" oninput="ddFilter('svc-search','svc-body','svc-count')"></div>
+      <div class="table-wrap" style="max-height:64vh;overflow:auto">
+        <table><thead><tr><th>Служба</th><th style="width:120px">Запуск</th><th>Путь</th></tr></thead><tbody id="svc-body"></tbody></table>
+      </div>
+      <div id="svc-empty" class="empty" style="display:none">Нет данных. Появятся после сбора агентом (раз в 6 часов).</div>
+    </div>
+  </div>
+
+  <!-- АВТОЗАГРУЗКА -->
+  <div class="tab-pane" id="pane-autoruns" hidden>
+    <div class="card">
+      <div class="pane-head"><span class="card-title">Автозагрузка</span><span class="count-badge" id="ar-count"></span>
+        <input class="dd-search" id="ar-search" type="search" placeholder="Поиск по автозагрузке…" oninput="ddFilter('ar-search','ar-body','ar-count')"></div>
+      <div class="table-wrap" style="max-height:64vh;overflow:auto">
+        <table><thead><tr><th style="width:200px">Расположение</th><th style="width:200px">Имя</th><th>Команда</th></tr></thead><tbody id="ar-body"></tbody></table>
+      </div>
+      <div id="ar-empty" class="empty" style="display:none">Нет данных. Появятся после сбора агентом (раз в час).</div>
+    </div>
+  </div>
+
+  <!-- ЗАДАЧИ -->
+  <div class="tab-pane" id="pane-schtasks" hidden>
+    <div class="card">
+      <div class="pane-head"><span class="card-title">Задачи планировщика</span><span class="count-badge" id="task-count"></span>
+        <input class="dd-search" id="task-search" type="search" placeholder="Поиск по задачам…" oninput="ddFilter('task-search','task-body','task-count')"></div>
+      <div class="table-wrap" style="max-height:64vh;overflow:auto">
+        <table><thead><tr><th>Задача</th><th style="width:110px">Состояние</th><th>Действие</th></tr></thead><tbody id="task-body"></tbody></table>
+      </div>
+      <div id="task-empty" class="empty" style="display:none">Нет данных. Появятся после сбора агентом (раз в 6 часов).</div>
+    </div>
+  </div>
+
+  <!-- ИСТОРИЯ -->
+  <div class="tab-pane" id="pane-history" hidden>
+    <div class="card">
+      <div class="pane-head"><span class="card-title">История изменений</span><span class="count-badge" id="chg-count"></span>
+        <input class="dd-search" id="chg-search" type="search" placeholder="Поиск…" oninput="ddFilter('chg-search','chg-body','chg-count')"></div>
+      <div class="table-wrap" style="max-height:64vh;overflow:auto">
+        <table><thead><tr><th style="width:150px">Время</th><th style="width:200px">Что</th><th>Было → Стало</th></tr></thead><tbody id="chg-body"></tbody></table>
+      </div>
+      <div id="chg-empty" class="empty" style="display:none">Изменений пока нет. Появятся при смене железа, ОС или установке/удалении ПО.</div>
+    </div>
+  </div>
+
+  <!-- ДЕЙСТВИЯ -->
+  <div class="tab-pane" id="pane-tasks" hidden>
+    {{if .User.CanWrite}}
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:12px">Выполнить команду</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <select id="cmd-select" style="min-width:260px;padding:9px 12px;border:1px solid var(--border-2);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px">
+          <option value="">— выберите действие —</option>
+          {{range .Commands}}<option value="{{.Key}}" data-danger="{{if .Danger}}1{{end}}">{{.Name}}{{if .Danger}} ⚠{{end}}</option>{{end}}
+        </select>
+        <button class="btn btn-primary" onclick="ddRunCommand()">Выполнить</button>
+      </div>
+      <p class="text-muted" style="font-size:12px;margin-top:8px">Команды из готовой библиотеки. Результат появится в таблице ниже после выполнения агентом.</p>
+    </div>
+    {{end}}
+    <div class="card">
+      <div class="pane-head"><span class="card-title">Удалённые действия</span><span class="count-badge" id="task-act-count"></span>
+        <input class="dd-search" id="task-act-search" type="search" placeholder="Поиск…" oninput="ddFilter('task-act-search','task-act-body','task-act-count')"></div>
+      <div class="table-wrap" style="max-height:64vh;overflow:auto">
+        <table><thead><tr><th style="width:150px">Создано</th><th style="width:170px">Действие</th><th style="width:110px">Статус</th><th>Результат</th></tr></thead><tbody id="task-act-body"></tbody></table>
+      </div>
+      <div id="task-act-empty" class="empty" style="display:none">Удалённых действий ещё не было. Используйте кнопки питания/команд в шапке.</div>
+    </div>
+  </div>
+</div>
+
+{{if .User.CanWrite}}
+<div class="modal-overlay" id="modal-edit" onclick="closeOnOverlay(event,'modal-edit')">
+  <div class="modal modal-wide">
+    <h3>Изменить устройство</h3>
+    <form method="post" action="/devices/{{.Device.ID}}/update">
+      <input type="hidden" name="redirect" value="/devices/{{.Device.ID}}?message=Сохранено">
+      <div class="form-row cols-2">
+        <div class="form-group"><label>Имя хоста *</label><input name="hostname" value="{{.Device.Hostname}}" required></div>
+        <div class="form-group"><label>IP-адрес</label><input name="ip_address" value="{{.Device.IP}}"></div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label>MAC-адрес</label><input name="mac_address" value="{{.Device.MAC}}"></div>
+        <div class="form-group"><label>ОС</label><input name="os_type" value="{{.Device.OSType}}"></div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label>Тип устройства</label><input name="device_type" value="{{.Device.DeviceType}}" placeholder="ПК, ноутбук, принтер…"></div>
+        <div class="form-group">
+          <label>Сотрудник</label>
+          <select name="employee_id">
+            <option value="">— не назначен —</option>
+            {{range .Employees}}<option value="{{.ID}}"{{if eq .ID $.Device.EmployeeID}} selected{{end}}>{{.Name}}{{if .Dept}} · {{.Dept}}{{end}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <div class="form-row cols-3">
+        <div class="form-group"><label>Производитель</label><input name="manufacturer" value="{{.Device.Manufacturer}}"></div>
+        <div class="form-group"><label>Модель</label><input name="model" value="{{.Device.Model}}"></div>
+        <div class="form-group"><label>Серийный №</label><input name="serial_number" value="{{.Device.SerialNumber}}"></div>
+      </div>
+      <div class="form-row"><div class="form-group"><label>Расположение</label><input name="location" value="{{.Device.Location}}"></div></div>
+      <div class="form-row"><div class="form-group"><label>Заметки</label><textarea name="notes">{{.Device.Notes}}</textarea></div></div>
+      <div class="form-row">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text)">
+          <input type="checkbox" name="critical" value="1" style="width:auto"{{if .Device.Critical}} checked{{end}}> Критически важное устройство (email-алерт при потере связи)
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-edit')">Отмена</button>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{define "scripts"}}
+<script>
+const DEV_ID = {{.Device.ID}};
+const DEV_IP = "{{.Device.IP}}";
+const DEV_HOST = "{{.Device.Hostname}}";
+const esc = s => (s||'').replace(/</g,'&lt;');
+function loadingRow(cols){ return `<tr><td colspan="${cols}" class="loading-row"><span class="spinner"></span>Загрузка…</td></tr>`; }
+function ddFilter(searchId, bodyId, countId){
+  const q = (document.getElementById(searchId).value || '').toLowerCase();
+  const rows = document.querySelectorAll('#'+bodyId+' tr');
+  let shown = 0;
+  rows.forEach(tr=>{ const m = !q || tr.textContent.toLowerCase().includes(q); tr.style.display = m ? '' : 'none'; if(m) shown++; });
+  const c = document.getElementById(countId);
+  if(c) c.textContent = rows.length ? (q ? shown+' из '+rows.length : ''+rows.length) : '';
+}
+
+// generic loader: fetch url, map list → rows
+async function loadTable(url, key, bodyId, emptyId, countId, searchId, rowFn, cols){
+  const body = document.getElementById(bodyId), empty = document.getElementById(emptyId);
+  body.innerHTML = loadingRow(cols); empty.style.display = 'none';
+  try{
+    const d = await (await fetch(url)).json();
+    const list = d[key] || [];
+    if(!list.length){ body.innerHTML=''; empty.style.display='block'; if(countId) document.getElementById(countId).textContent=''; return; }
+    body.innerHTML = list.map(rowFn).join('');
+    if(searchId) ddFilter(searchId, bodyId, countId);
+  }catch(e){ body.innerHTML=''; empty.style.display='block'; }
+}
+
+const loaders = {
+  software: () => loadTable(`/api/devices/${DEV_ID}/software`, 'software', 'sw-body', 'sw-empty', 'sw-count', 'sw-search',
+    s=>`<tr><td>${esc(s.name)}</td><td class="text-muted">${esc(s.version)}</td><td class="text-muted">${esc(s.install_date)}</td></tr>`, 3),
+  services: () => loadTable(`/api/devices/${DEV_ID}/services`, 'services', 'svc-body', 'svc-empty', 'svc-count', 'svc-search',
+    s=>`<tr><td>${esc(s.display_name||s.name)}</td><td class="text-muted">${esc(s.start_type)}</td><td class="text-muted" style="word-break:break-all">${esc(s.path)}</td></tr>`, 3),
+  autoruns: () => loadTable(`/api/devices/${DEV_ID}/autoruns`, 'autoruns', 'ar-body', 'ar-empty', 'ar-count', 'ar-search',
+    s=>`<tr><td class="text-muted">${esc(s.location)}</td><td>${esc(s.name)}</td><td class="text-muted" style="word-break:break-all">${esc(s.command)}</td></tr>`, 3),
+  schtasks: () => loadTable(`/api/devices/${DEV_ID}/schtasks`, 'tasks', 'task-body', 'task-empty', 'task-count', 'task-search',
+    s=>`<tr><td>${esc((s.path||'')+(s.name||''))}</td><td class="text-muted">${esc(s.state)}</td><td class="text-muted" style="word-break:break-all">${esc(s.action)}</td></tr>`, 3),
+  history: () => loadTable(`/api/devices/${DEV_ID}/changes`, 'changes', 'chg-body', 'chg-empty', 'chg-count', 'chg-search',
+    c=>`<tr><td class="text-muted" style="white-space:nowrap">${esc(c.ts)}</td><td><b>${esc(c.field)}</b></td><td>${c.old?esc(c.old):'—'} <span class="text-muted">→</span> ${c.new?esc(c.new):'—'}</td></tr>`, 3),
+  disks: () => loadTable(`/api/devices/${DEV_ID}/disks`, 'disks', 'disk-body', 'disk-empty', 'disk-count', 'disk-search',
+    d=>{ const sev = d.severity==='critical' ? `<span class="badge badge-red">⚠ ${esc(d.issue)}</span>`
+        : (d.severity==='warning' ? `<span class="badge badge-amber">${esc(d.issue)}</span>` : '<span class="badge badge-green">исправен</span>');
+      return `<tr><td>${esc(d.model)||'—'}${d.serial?`<div class="text-muted" style="font-size:12px">S/N ${esc(d.serial)}</div>`:''}</td>`+
+        `<td>${esc(d.media_type)||'—'}</td><td>${d.size_gb?d.size_gb+' ГБ':'—'}</td>`+
+        `<td>${d.wear_pct?d.wear_pct+'%':'—'}</td><td>${d.temperature?d.temperature+'°C':'—'}</td>`+
+        `<td class="text-muted">${d.power_on_hours?d.power_on_hours+' ч':'—'}</td><td>${sev}</td></tr>`; }, 7),
+  tasks: () => loadTable(`/api/devices/${DEV_ID}/tasks`, 'tasks', 'task-act-body', 'task-act-empty', 'task-act-count', 'task-act-search',
+    t=>{ const st = t.status==='done' ? '<span class="badge badge-green">выполнено</span>'
+        : t.status==='failed' ? '<span class="badge badge-red">ошибка</span>'
+        : t.status==='sent' ? '<span class="badge badge-accent">отправлено</span>'
+        : '<span class="badge badge-amber">ожидает</span>';
+      return `<tr><td class="text-muted" style="white-space:nowrap">${esc(t.created)}</td><td>${esc(t.label||t.kind)}</td><td>${st}</td><td class="text-muted" style="word-break:break-word">${esc(t.result)||'—'}</td></tr>`; }, 4),
+  metrics: () => loadMetrics(),
+};
+const loaded = {};
+
+document.getElementById('dd-tabs').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-tab]'); if(!b) return;
+  const tab = b.dataset.tab;
+  document.querySelectorAll('#dd-tabs button').forEach(x=>x.classList.toggle('on', x===b));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.hidden = (p.id !== 'pane-'+tab));
+  if(loaders[tab] && !loaded[tab]){ loaded[tab] = true; loaders[tab](); }
+  if(tab==='metrics') loadMetrics(); // перерисовать под актуальный размер
+});
+
+// ── метрики ──
+let ddHours = 24;
+document.getElementById('dd-range').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-h]'); if(!b) return;
+  ddHours = +b.dataset.h;
+  document.querySelectorAll('#dd-range button').forEach(x=>x.classList.toggle('on', x===b));
+  loadMetrics();
+});
+async function loadMetrics(){
+  const canvas = document.getElementById('dd-canvas'), empty = document.getElementById('dd-canvas-empty');
+  try{
+    const d = await (await fetch(`/api/devices/${DEV_ID}/metrics?hours=${ddHours}`)).json();
+    if(!d.points || !d.points.length){ canvas.style.display='none'; empty.style.display='block'; return; }
+    empty.style.display='none'; canvas.style.display='block';
+    drawLines(canvas, d.points);
+  }catch(e){ canvas.style.display='none'; empty.style.display='block'; }
+}
+function drawLines(canvas, points){
+  const dpr = window.devicePixelRatio||1, w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width=w*dpr; canvas.height=h*dpr;
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+  const padL=34,padR=10,padT=10,padB=22, plotW=w-padL-padR, plotH=h-padT-padB;
+  const yOf=v=>padT+plotH*(1-v/100), xOf=i=>padL+(points.length===1?plotW/2:plotW*i/(points.length-1));
+  const css=getComputedStyle(document.documentElement);
+  ctx.strokeStyle=css.getPropertyValue('--border').trim(); ctx.fillStyle=css.getPropertyValue('--muted').trim();
+  ctx.font='11px sans-serif'; ctx.lineWidth=1; ctx.textAlign='right'; ctx.textBaseline='middle';
+  for(let v=0;v<=100;v+=25){const y=yOf(v);ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(w-padR,y);ctx.stroke();ctx.fillText(v+'%',padL-6,y);}
+  ctx.textBaseline='top'; ctx.textAlign='left'; ctx.fillText((points[0].ts||'').slice(5,16),padL,h-padB+5);
+  if(points.length>1){ctx.textAlign='right';ctx.fillText((points[points.length-1].ts||'').slice(5,16),w-padR,h-padB+5);}
+  for(const [k,c] of [['cpu','#0d9488'],['ram','#7c3aed'],['disk','#d97706']]){
+    ctx.strokeStyle=c; ctx.lineWidth=1.8; ctx.beginPath(); let st=false;
+    points.forEach((p,i)=>{const v=p[k]; if(v==null){st=false;return;} const x=xOf(i),y=yOf(v); st?ctx.lineTo(x,y):(ctx.moveTo(x,y),st=true);});
+    ctx.stroke();
+  }
+}
+
+// ── действия ──
+async function ddPing(){
+  const el = document.getElementById('dd-status');
+  el.innerHTML = '<span class="badge badge-amber">пинг…</span>';
+  try{
+    const d = await (await fetch('/api/ping',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':window.csrfToken},body:JSON.stringify({ip:DEV_IP})})).json();
+    el.innerHTML = d.status==='online' ? '<span class="badge badge-green">онлайн</span>' : '<span class="badge badge-red">оффлайн</span>';
+    toast(d.status==='online' ? 'Устройство в сети' : 'Устройство не отвечает', d.status==='online'?'ok':'err');
+  }catch(e){ el.innerHTML='<span class="badge badge-gray">ошибка</span>'; toast('Ошибка пинга','err'); }
+}
+const POWER_LABELS = {wol:'включить (Wake-on-LAN)', reboot:'ПЕРЕЗАГРУЗИТЬ', shutdown:'ВЫКЛЮЧИТЬ', logoff:'завершить сессию пользователя на'};
+async function ddRunCommand(){
+  const sel = document.getElementById('cmd-select');
+  const key = sel.value; if(!key){ toast('Выберите команду','err'); return; }
+  const o = sel.options[sel.selectedIndex];
+  if(o.dataset.danger==='1' && !confirm('Команда прервёт работу пользователя. Выполнить?')) return;
+  try{
+    const fd = new URLSearchParams({cmd:key});
+    const d = await (await fetch(`/devices/${DEV_ID}/run-command`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':window.csrfToken},body:fd})).json();
+    toast(d.ok ? (d.message||'Задача поставлена') : (d.error||'Ошибка'), d.ok?'ok':'err');
+    if(d.ok){ loaded['tasks']=false; loaders.tasks(); loaded['tasks']=true; }
+  }catch(e){ toast('Ошибка запуска команды','err'); }
+}
+async function ddPower(action){
+  if(action!=='wol' && !confirm(`Точно ${POWER_LABELS[action]} устройство ${DEV_HOST}?`)) return;
+  try{
+    const fd = new URLSearchParams({action});
+    const d = await (await fetch(`/devices/${DEV_ID}/power`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':window.csrfToken},body:fd})).json();
+    toast(d.ok ? (d.message||'Готово') : (d.error||'Ошибка'), d.ok?'ok':'err');
+    if(d.ok){ loaded['tasks']=false; }
+  }catch(e){ toast('Ошибка выполнения действия','err'); }
+}
+async function ddScanPorts(btn){
+  const old = btn.textContent; btn.disabled=true; btn.textContent='Скан…';
+  try{
+    const d = await (await fetch(`/devices/${DEV_ID}/scan-ports`,{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}})).json();
+    if(d.ok){ toast('Открытые порты: ' + (d.ports && d.ports.length ? d.ports.join(', ') : 'нет'), 'ok'); setTimeout(()=>location.reload(),900); }
+    else { toast(d.error || 'Ошибка', 'err'); btn.disabled=false; btn.textContent=old; }
+  }catch(e){ toast('Ошибка сканирования портов','err'); btn.disabled=false; btn.textContent=old; }
+}
+</script>
+{{end}}

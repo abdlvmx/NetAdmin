@@ -1,0 +1,104 @@
+{{define "title"}}Пользователи{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Пользователи</h1>
+    <div class="sub">Локальные учётные записи системы</div>
+  </div>
+  {{if eq .User.Role "admin"}}
+  <button class="btn btn-primary" onclick="openModal('modal-add')">+ Пользователь</button>
+  {{end}}
+</div>
+
+<div class="content">
+  <div class="toolbar">
+    <input type="text" placeholder="Поиск: логин, имя, email…" data-filter-target="#users-body">
+    <select data-filter-target="#users-body" data-col="role">
+      <option value="all">Все роли</option>
+      <option value="admin">Администраторы</option>
+      <option value="user">Операторы</option>
+      <option value="viewer">Наблюдатели</option>
+    </select>
+  </div>
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th data-sort>Логин</th><th data-sort>Имя</th><th>Email</th><th data-sort>Роль</th><th data-sort>Статус</th><th data-sort>Создан</th><th></th></tr>
+        </thead>
+        <tbody id="users-body">
+          {{range .AllUsers}}
+          <tr data-role="{{.Role}}">
+            <td style="font-weight:600">{{.Username}}</td>
+            <td class="text-muted">{{if .FullName}}{{.FullName}}{{else}}—{{end}}</td>
+            <td class="text-muted">{{if .Email}}{{.Email}}{{else}}—{{end}}</td>
+            <td>
+              {{if eq .Role "admin"}}<span class="badge badge-accent">администратор</span>
+              {{else if eq .Role "viewer"}}<span class="badge badge-gray">наблюдатель</span>
+              {{else}}<span class="badge badge-gray">оператор</span>{{end}}
+            </td>
+            <td>{{if .IsActive}}<span class="badge badge-green">активен</span>{{else}}<span class="badge badge-gray">отключён</span>{{end}}</td>
+            <td class="text-muted" style="white-space:nowrap">{{.CreatedAt}}</td>
+            <td>
+              {{if eq $.User.Role "admin"}}
+              <div class="row-actions">
+                <form method="post" action="/users/{{.ID}}/toggle">
+                  <button class="btn btn-ghost btn-sm">{{if .IsActive}}Отключить{{else}}Включить{{end}}</button>
+                </form>
+                {{if ne .ID $.User.ID}}
+                <form method="post" action="/users/{{.ID}}/delete" onsubmit="return confirm('Удалить {{.Username}}?')">
+                  <button class="btn btn-ghost btn-sm" style="color:var(--red)">Удалить</button>
+                </form>
+                {{end}}
+              </div>
+              {{end}}
+            </td>
+          </tr>
+          {{else}}
+          <tr><td colspan="7" class="empty">Пользователей нет.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-add" onclick="closeOnOverlay(event,'modal-add')">
+  <div class="modal">
+    <h3>Новый пользователь</h3>
+    <form method="post" action="/users/create">
+      <div class="form-row cols-2">
+        <div class="form-group"><label>Логин *</label><input name="username" required minlength="3"></div>
+        <div class="form-group"><label>Имя</label><input name="full_name"></div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label>Email</label><input name="email"></div>
+        <div class="form-group">
+          <label>Роль</label>
+          <select name="role">
+            <option value="user">оператор</option>
+            <option value="viewer">наблюдатель</option>
+            <option value="admin">администратор</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Пароль *</label><input type="password" name="password" required minlength="8"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add')">Отмена</button>
+        <button type="submit" class="btn btn-primary">Создать</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+function openModal(id){ document.getElementById(id).classList.add('open'); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+function closeOnOverlay(e,id){ if(e.target===e.currentTarget) closeModal(id); }
+</script>
+{{end}}

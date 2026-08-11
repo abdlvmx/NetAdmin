@@ -1,0 +1,125 @@
+{{define "title"}}SNMP-устройства{{end}}
+
+{{define "extra_head"}}
+<style>
+  .sm-add { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .sm-add .fld { display: flex; flex-direction: column; gap: 4px; }
+  .sm-add label { font-size: 12px; color: var(--muted); }
+  .up-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>SNMP-устройства</h1>
+    <div class="sub">Опрос свитчей, роутеров, ИБП и сетевых принтеров по SNMP v2c · ~раз в минуту</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  {{if .Msg}}<div class="banner">{{.Msg}}</div>{{end}}
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="lbl">Устройств</div><div class="num">{{.Total}}</div></div>
+    <div class="summary-card"><div class="lbl">Доступны</div><div class="num text-green">{{.Up}}</div></div>
+    <div class="summary-card"><div class="lbl">Недоступны</div><div class="num {{if .Down}}text-red{{end}}">{{.Down}}</div></div>
+  </div>
+
+  {{if eq .User.Role "admin"}}
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><span class="card-title">Добавить устройство</span></div>
+    <div style="padding:14px 18px">
+      <form method="post" action="/snmp/add" class="sm-add">
+        <div class="fld"><label>Название</label><input name="name" placeholder="Свитч склад"></div>
+        <div class="fld"><label>IP-адрес</label><input name="ip" placeholder="192.168.1.2" required></div>
+        <div class="fld"><label>Тип</label>
+          <select name="kind">
+            <option value="auto">Авто</option>
+            <option value="switch">Коммутатор</option>
+            <option value="router">Маршрутизатор</option>
+            <option value="ups">ИБП</option>
+            <option value="printer">Принтер</option>
+            <option value="server">Сервер</option>
+            <option value="other">Другое</option>
+          </select></div>
+        <div class="fld"><label>Community</label><input name="community" placeholder="public" value="public"></div>
+        <div class="fld"><label>Порт</label><input name="port" type="number" value="161" style="width:90px"></div>
+        <div class="fld"><label>Интервал, сек</label><input name="interval_sec" type="number" value="120" style="width:110px"></div>
+        <button class="btn btn-primary">Добавить</button>
+      </form>
+      <p class="text-muted" style="font-size:12px;margin-top:10px">
+        На устройстве должен быть включён SNMP v2c с указанной community-строкой (только чтение).</p>
+    </div>
+  </div>
+  {{end}}
+
+  <div class="toolbar">
+    <input type="text" placeholder="Поиск: имя, IP, sysName…" data-filter-target="#snmp-body">
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Устройства</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort>Устройство</th>
+            <th data-sort style="width:130px">IP</th>
+            <th data-sort style="width:120px">Тип</th>
+            <th data-sort style="width:130px">Статус</th>
+            <th>Состояние</th>
+            <th data-sort style="width:120px">Аптайм</th>
+            <th data-sort style="width:140px">Опрошено</th>
+            {{if .User.CanWrite}}<th style="width:200px"></th>{{end}}
+          </tr>
+        </thead>
+        <tbody id="snmp-body">
+          {{range .Rows}}
+          <tr>
+            <td><b>{{if .Name}}{{.Name}}{{else}}{{.IP}}{{end}}</b>{{if .SysName}}<div class="text-muted" style="font-size:12px">{{.SysName}}</div>{{end}}{{if not .Enabled}} <span class="badge badge-gray">выкл</span>{{end}}</td>
+            <td class="text-muted">{{.IP}}</td>
+            <td class="text-muted">{{.KindRu}}</td>
+            <td>
+              {{if eq .Status "up"}}<span class="up-dot" style="background:var(--green)"></span>в сети
+              {{else if eq .Status "down"}}<span class="up-dot" style="background:var(--red)"></span><span class="text-red">недоступно</span>
+              {{else}}<span class="up-dot" style="background:var(--border-2)"></span><span class="text-muted">нет данных</span>{{end}}
+            </td>
+            <td>{{if .Summary}}<span {{if .Warn}}class="text-amber"{{end}}>{{.Summary}}</span>{{else}}<span class="text-muted">—</span>{{end}}</td>
+            <td class="text-muted">{{if .Uptime}}{{.Uptime}}{{else}}—{{end}}</td>
+            <td class="text-muted" style="white-space:nowrap">{{if .LastPoll}}{{.LastPoll}}{{else}}—{{end}}</td>
+            {{if $.User.CanWrite}}
+            <td>
+              <div class="row-actions">
+                <button class="btn btn-ghost btn-sm" onclick="pollNow({{.ID}}, this)">Опросить</button>
+                {{if or (eq .Kind "switch") (eq .Kind "router")}}<a class="btn btn-ghost btn-sm" href="/snmp/{{.ID}}/ports">Порты</a>{{end}}
+                {{if eq $.User.Role "admin"}}
+                <form method="post" action="/snmp/{{.ID}}/toggle"><button class="btn btn-ghost btn-sm">{{if .Enabled}}Выкл{{else}}Вкл{{end}}</button></form>
+                <form method="post" action="/snmp/{{.ID}}/delete" onsubmit="return confirm('Удалить устройство?')"><button class="btn btn-ghost btn-sm">Удалить</button></form>
+                {{end}}
+              </div>
+            </td>
+            {{end}}
+          </tr>
+          {{else}}
+          <tr><td colspan="8" class="empty">SNMP-устройств нет. Добавьте свитч, роутер, ИБП или сетевой принтер для мониторинга.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+async function pollNow(id, btn){
+  const old = btn.textContent; btn.disabled=true; btn.textContent='Опрос…';
+  try{
+    const d = await (await fetch(`/snmp/${id}/poll`,{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}})).json();
+    if(d.ok){ toast(d.status==='up'?'Устройство в сети':'Устройство недоступно', d.status==='up'?'ok':'err'); setTimeout(()=>location.reload(),700); }
+    else { toast(d.error||'Ошибка', 'err'); btn.disabled=false; btn.textContent=old; }
+  }catch(e){ toast('Ошибка опроса','err'); btn.disabled=false; btn.textContent=old; }
+}
+</script>
+{{end}}

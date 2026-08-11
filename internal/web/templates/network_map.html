@@ -1,0 +1,261 @@
+{{define "title"}}Карта сети{{end}}
+
+{{define "extra_head"}}
+<style>
+  .map-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .map-toolbar input#map-search { width: auto; min-width: 240px; }
+  .map-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .map-chips button { border: 1px solid var(--border-2); background: var(--surface); color: var(--muted);
+    font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 20px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px; transition: all .12s; }
+  .map-chips button.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .map-chips button .cdot { width: 8px; height: 8px; border-radius: 50%; }
+  .map-layout { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }
+  .map-wrap { position: relative; padding: 8px; }
+  #netmap { width: 100%; height: 72vh; min-height: 460px; display: block; }
+  #netmap .edge { stroke: var(--border); stroke-width: 1; }
+  #netmap .guide { fill: none; stroke: var(--border); stroke-dasharray: 3 6; opacity: .5; }
+  #netmap .node { cursor: pointer; transition: opacity .15s, r .12s ease; }
+  #netmap .halo { fill: var(--surface); }
+  #netmap text { font-family: inherit; fill: var(--muted); pointer-events: none; }
+  .map-tip { position: absolute; pointer-events: none; z-index: 20; display: none;
+    background: var(--surface-3); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 13px; font-size: 12px; line-height: 1.6; box-shadow: var(--shadow-lg); max-width: 290px; }
+  .map-tip b { font-weight: 700; }
+  .map-tip .st { display: inline-block; padding: 1px 7px; border-radius: 6px; font-weight: 600; }
+  .map-empty { text-align: center; padding: 60px; color: var(--muted); }
+  .problem-panel { padding: 0; max-height: 72vh; display: flex; flex-direction: column; }
+  .pp-head { padding: 14px 18px; font-weight: 700; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .pp-list { overflow-y: auto; flex: 1; }
+  .pp-item { padding: 10px 18px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .12s; }
+  .pp-item:hover { background: var(--surface-2); }
+  .pp-item .nm { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+  .pp-item .meta { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .pp-empty { padding: 28px 18px; text-align: center; color: var(--muted); font-size: 13px; }
+  @media (max-width: 900px) { .map-layout { grid-template-columns: 1fr; } .problem-panel { max-height: 320px; } }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Карта сети</h1>
+    <div class="sub">Типы, статусы и важность устройств · поиск, фильтры и панель проблем</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  <div class="map-toolbar">
+    <input type="text" id="map-search" placeholder="🔍 Поиск: имя, IP, MAC, вендор…">
+    <select id="map-group">
+      <option value="type">Группировка: по типу</option>
+      <option value="subnet">по подсети</option>
+      <option value="none">без группировки</option>
+    </select>
+    <div class="map-chips" id="map-filters"></div>
+    <a href="/devices" class="btn btn-ghost btn-sm" style="margin-left:auto">Таблица</a>
+  </div>
+
+  <div class="map-layout">
+    <div class="card map-wrap">
+      <svg id="netmap" preserveAspectRatio="xMidYMid meet"></svg>
+      <div id="map-empty" class="map-empty" style="display:none">Устройств нет. Запустите сканирование сети или агента.</div>
+      <div class="map-tip" id="map-tip"></div>
+    </div>
+    <div class="card problem-panel">
+      <div class="pp-head">⚠️ Проблемы <span class="badge badge-red" id="pp-count">0</span></div>
+      <div class="pp-list" id="pp-list"></div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+const SVGNS = "http://www.w3.org/2000/svg";
+const css = getComputedStyle(document.documentElement);
+const cv = n => css.getPropertyValue(n).trim();
+const ACCENT = cv('--accent'), ACCENT2 = cv('--accent-hov') || ACCENT, TEXT = cv('--text');
+
+const TYPE = {
+  pc:      { e:'🖥', l:'ПК',              s:8 },
+  server:  { e:'🗄', l:'Сервер',          s:12 },
+  phone:   { e:'📱', l:'Телефон',         s:5 },
+  camera:  { e:'📹', l:'Камера',          s:6 },
+  ap:      { e:'📡', l:'Точка доступа',    s:9 },
+  printer: { e:'🖨', l:'Принтер',         s:7 },
+  network: { e:'🔀', l:'Сеть/коммутатор', s:12 },
+  other:   { e:'🔵', l:'Прочее',          s:7 },
+};
+const STC = { online: cv('--green'), stale: cv('--amber'), offline: cv('--red'), unknown: '#9aa6bd' };
+const STL = { online:'онлайн', stale:'давно не отвечал', offline:'оффлайн', unknown:'неизвестно' };
+const SORD = { online:0, stale:1, unknown:2, offline:3 };
+
+let allNodes = [], gateway = 'Сеть';
+const statusOn = new Set(['online','stale','offline','unknown']);
+const typeOn = new Set();
+let groupBy = 'type';
+
+function el(tag, attrs) { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function trunc(s,n){ s=s||''; return s.length>n ? s.slice(0,n-1)+'…' : s; }
+function nodeKey(n){ return (n.hostname+' '+n.ip+' '+n.mac+' '+n.vendor).toLowerCase(); }
+
+function ringLayout(n) {
+  const pos = [], radii = [];
+  const r0 = 135, gap = 90, minArc = 38;
+  let placed = 0, ring = 1;
+  while (placed < n) {
+    const radius = r0 + (ring - 1) * gap;
+    let cap = Math.max(6, Math.floor((2*Math.PI*radius)/minArc));
+    cap = Math.min(cap, n - placed);
+    radii.push(radius);
+    const off = (ring % 2) ? 0 : Math.PI / cap;
+    for (let i=0;i<cap;i++){ const a=(i/cap)*2*Math.PI - Math.PI/2 + off; pos.push({x:radius*Math.cos(a), y:radius*Math.sin(a)}); }
+    placed += cap; ring++;
+  }
+  return { pos, radii, maxR: radii.length ? radii[radii.length-1] : r0 };
+}
+
+function visibleNodes(){ return allNodes.filter(n => statusOn.has(n.status) && typeOn.has(n.type)); }
+function groupKeyOf(n){ return groupBy==='type' ? (TYPE[n.type]?.l || n.type) : groupBy==='subnet' ? (n.subnet||'—') : ''; }
+
+function render() {
+  const svg = document.getElementById('netmap');
+  const empty = document.getElementById('map-empty');
+  const tip = document.getElementById('map-tip');
+  const nodes = visibleNodes().slice().sort((a,b)=>{
+    const ga=groupKeyOf(a), gb=groupKeyOf(b);
+    if (ga!==gb) return ga<gb?-1:1;
+    return (SORD[a.status]??2)-(SORD[b.status]??2);
+  });
+
+  svg.innerHTML = '';
+  if (!nodes.length) { empty.style.display='block'; svg.style.display='none'; applySearch(); return; }
+  empty.style.display='none'; svg.style.display='block';
+
+  const { pos, radii, maxR } = ringLayout(nodes.length);
+  const showLabels = nodes.length <= 40;
+  const R = maxR + (showLabels ? 78 : 44);
+  svg.setAttribute('viewBox', `${-R} ${-R} ${2*R} ${2*R}`);
+
+  const defs = el('defs', {});
+  defs.innerHTML =
+    `<filter id="ds" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="1.2" stdDeviation="1.6" flood-color="rgba(20,40,80,.30)"/></filter>
+     <radialGradient id="hubg" cx="35%" cy="30%" r="80%"><stop offset="0%" stop-color="${ACCENT}"/><stop offset="100%" stop-color="${ACCENT2}"/></radialGradient>`;
+  svg.appendChild(defs);
+
+  const guides = el('g', {}); radii.forEach(r => guides.appendChild(el('circle',{class:'guide',cx:0,cy:0,r}))); svg.appendChild(guides);
+  const edges = el('g', {}); pos.forEach(p => edges.appendChild(el('line',{class:'edge',x1:0,y1:0,x2:p.x,y2:p.y,opacity:.3}))); svg.appendChild(edges);
+
+  nodes.forEach((n,i)=>{
+    const p = pos[i];
+    const t = TYPE[n.type] || TYPE.other;
+    let nr = (nodes.length>60 ? Math.max(5, t.s-2) : t.s) + (n.critical ? 3 : 0);
+    const color = STC[n.status] || STC.unknown;
+    const g = el('g', {});
+    g.appendChild(el('circle',{class:'halo',cx:p.x,cy:p.y,r:nr+3,filter:'url(#ds)'}));
+    const c = el('circle',{class:'node',cx:p.x,cy:p.y,r:nr,fill:color,stroke: n.critical ? ACCENT : '#fff','stroke-width': n.critical?2.5:2});
+    c.dataset.key = nodeKey(n);
+    g.appendChild(c);
+    if (showLabels) {
+      const lt = el('text',{x:p.x,y:p.y+nr+13,'text-anchor':'middle','font-size':11});
+      lt.textContent = t.e + ' ' + trunc(n.hostname || n.ip, 14);
+      g.appendChild(lt);
+    }
+    c.addEventListener('mouseenter', ()=>{ c.setAttribute('r', nr+3); showTip(n); });
+    c.addEventListener('mousemove', e=>moveTip(e));
+    c.addEventListener('mouseleave', ()=>{ c.setAttribute('r', nr); tip.style.display='none'; });
+    c.addEventListener('click', ()=>{ location.href='/devices'; });
+    svg.appendChild(g);
+  });
+
+  const hub = el('g', {});
+  hub.appendChild(el('circle',{cx:0,cy:0,r:32,fill:'url(#hubg)',filter:'url(#ds)'}));
+  const ht = el('text',{x:0,y:7,'text-anchor':'middle','font-size':24}); ht.textContent='🌐'; hub.appendChild(ht);
+  const gw = el('text',{x:0,y:52,'text-anchor':'middle','font-size':13,'font-weight':700,fill:TEXT}); gw.textContent=gateway; hub.appendChild(gw);
+  svg.appendChild(hub);
+
+  applySearch();
+}
+
+function showTip(n){
+  const tip = document.getElementById('map-tip');
+  const t = TYPE[n.type] || TYPE.other;
+  tip.innerHTML =
+    `<b>${t.e} ${esc(n.hostname||'—')}</b>${n.critical?' ★':''}<br>${esc(n.ip||'IP —')}` +
+    (n.mac?`<br>MAC: ${esc(n.mac)}`:'') + (n.vendor?`<br>${esc(n.vendor)}`:'') +
+    `<br>тип: ${t.l}` +
+    `<br>статус: <span class="st" style="background:${STC[n.status]}22;color:${STC[n.status]}">${STL[n.status]}</span>` +
+    (n.last_seen?`<br>онлайн: ${esc(n.last_seen)}`:'');
+  tip.style.display='block';
+}
+function moveTip(e){
+  const tip = document.getElementById('map-tip');
+  const wrap = document.getElementById('netmap').closest('.map-wrap').getBoundingClientRect();
+  tip.style.left = Math.min(e.clientX - wrap.left + 14, wrap.width - 295) + 'px';
+  tip.style.top  = (e.clientY - wrap.top + 14) + 'px';
+}
+
+function applySearch(){
+  const q = (document.getElementById('map-search').value||'').trim().toLowerCase();
+  document.querySelectorAll('#netmap .node').forEach(c=>{
+    const match = !q || (c.dataset.key||'').includes(q);
+    c.style.opacity = match ? 1 : 0.1;
+  });
+}
+
+function buildChips(){
+  const box = document.getElementById('map-filters');
+  box.innerHTML = '';
+  // статусы
+  ['online','stale','offline','unknown'].forEach(s=>{
+    const cnt = allNodes.filter(n=>n.status===s).length; if(!cnt) return;
+    const b = document.createElement('button'); b.className='on';
+    b.innerHTML = `<span class="cdot" style="background:${STC[s]}"></span>${STL[s]} ${cnt}`;
+    b.onclick = ()=>{ b.classList.toggle('on'); b.classList.contains('on')?statusOn.add(s):statusOn.delete(s); render(); };
+    box.appendChild(b);
+  });
+  // типы (только присутствующие)
+  const present = [...new Set(allNodes.map(n=>n.type))];
+  ['pc','server','phone','camera','ap','printer','network','other'].filter(t=>present.includes(t)).forEach(t=>{
+    typeOn.add(t);
+    const cnt = allNodes.filter(n=>n.type===t).length;
+    const b = document.createElement('button'); b.className='on';
+    b.innerHTML = `${TYPE[t].e} ${TYPE[t].l} ${cnt}`;
+    b.onclick = ()=>{ b.classList.toggle('on'); b.classList.contains('on')?typeOn.add(t):typeOn.delete(t); render(); };
+    box.appendChild(b);
+  });
+}
+
+function buildPanel(){
+  const list = document.getElementById('pp-list');
+  const probs = allNodes.filter(n => n.status==='offline' || n.status==='stale' || (n.critical && n.status!=='online'))
+    .sort((a,b)=>{
+      const w = n => (n.critical?0:2) + (n.status==='offline'?0:1);
+      return w(a)-w(b);
+    });
+  document.getElementById('pp-count').textContent = probs.length;
+  if (!probs.length){ list.innerHTML = '<div class="pp-empty">Проблемных устройств нет 🎉</div>'; return; }
+  list.innerHTML = '';
+  probs.forEach(n=>{
+    const t = TYPE[n.type] || TYPE.other;
+    const d = document.createElement('div'); d.className='pp-item';
+    d.innerHTML = `<div class="nm"><span class="cdot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${STC[n.status]}"></span>${t.e} ${esc(n.hostname||n.ip||'—')}${n.critical?' ★':''}</div>`+
+      `<div class="meta">${esc(n.ip||'')} · ${STL[n.status]}${n.last_seen?' · '+esc(n.last_seen):''}</div>`;
+    d.onclick = ()=>{ document.getElementById('map-search').value = n.hostname || n.ip || ''; applySearch(); };
+    list.appendChild(d);
+  });
+}
+
+async function load(){
+  let data; try { data = await (await fetch('/api/network-map')).json(); } catch(e){ return; }
+  allNodes = data.nodes || []; gateway = data.gateway || 'Сеть';
+  buildChips(); buildPanel(); render();
+}
+document.getElementById('map-search').addEventListener('input', applySearch);
+document.getElementById('map-group').addEventListener('change', e=>{ groupBy = e.target.value; render(); });
+load();
+</script>
+{{end}}

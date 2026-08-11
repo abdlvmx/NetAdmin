@@ -1,0 +1,55 @@
+{{define "title"}}Доступность (SLA){{end}}
+
+{{define "extra_head"}}
+<style>
+  .sla-good { color: var(--green); } .sla-medium { color: var(--amber); } .sla-poor { color: var(--red); }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Доступность сервисов (SLA)</h1>
+    <div class="sub">Процент времени доступности по проверкам · за {{.PeriodLabel}}</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  <div class="summary-grid">
+    <div class="summary-card"><div class="lbl">Средняя доступность</div><div class="num">{{printf "%.2f" .AvgUptime}}%</div></div>
+    <div class="summary-card"><div class="lbl">Период</div><div class="num" style="font-size:20px">{{.PeriodLabel}}</div></div>
+  </div>
+
+  <div class="toolbar">
+    <div class="pills">
+      <a href="/sla?period=week" class="btn btn-ghost btn-sm {{if eq .Period "week"}}btn-primary{{end}}">7 дней</a>
+      <a href="/sla" class="btn btn-ghost btn-sm {{if ne .Period "week"}}btn-primary{{end}}">30 дней</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="card-title">Доступность по сервисам</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-sort>Сервис</th><th style="width:80px">Тип</th><th>Цель</th><th data-sort style="width:140px">Доступность</th><th data-sort style="width:120px">Проверок</th></tr></thead>
+        <tbody>
+          {{range .Rows}}
+          <tr>
+            <td><b>{{.Name}}</b></td>
+            <td class="text-muted">{{.Type}}</td>
+            <td class="text-muted" style="word-break:break-all">{{.Target}}</td>
+            <td>{{if eq .Rating "nodata"}}<span class="text-muted">нет данных</span>{{else}}<b class="sla-{{.Rating}}">{{printf "%.2f" .Uptime}}%</b>{{end}}</td>
+            <td class="text-muted">{{.Checks}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="empty">Нет данных. Добавьте проверки в разделе «Сервисы» — статистика накопится со временем.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

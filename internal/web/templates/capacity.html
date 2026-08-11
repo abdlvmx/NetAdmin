@@ -1,0 +1,41 @@
+{{define "title"}}Прогноз ёмкости{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Прогноз ёмкости</h1>
+    <div class="sub">Когда диск/ОЗУ достигнут 95% — по тренду истории метрик (линейная регрессия)</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Прогнозы заполнения</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-sort>Хост</th><th style="width:120px">Ресурс</th><th data-sort style="width:140px">Сейчас</th><th data-sort style="width:200px">Прогноз до 95%</th></tr></thead>
+        <tbody>
+          {{range .Rows}}
+          <tr>
+            <td><b>{{.Hostname}}</b></td>
+            <td>{{.Resource}}</td>
+            <td>{{printf "%.0f" .Current}}%</td>
+            <td>
+              {{if le .Days 0}}<span class="badge badge-red">уже ≥95%</span>
+              {{else if le .Days 14}}<span class="badge badge-red">~{{.Days}} дн.</span>
+              {{else if le .Days 60}}<span class="badge badge-amber">~{{.Days}} дн.</span>
+              {{else}}<span class="text-muted">~{{.Days}} дн.</span>{{end}}
+            </td>
+          </tr>
+          {{else}}
+          <tr><td colspan="4" class="empty">Растущих трендов не найдено. Прогноз появится, когда накопится история (нужно ≥3 дней данных и положительный тренд).</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

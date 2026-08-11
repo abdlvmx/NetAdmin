@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.OrgName}} — Статус заявки</title>
+  <script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      color-scheme: light;
+      --bg: #f5f6fb; --surface: #ffffff; --surface-2:#f0f2f8; --border: #e7e9f1; --border-2: #d8dce8;
+      --accent: #4f46e5; --accent-hov: #4338ca; --accent-soft: rgba(79,70,229,.12);
+      --text: #181d2a; --muted: #6a7387; --red: #e2474d; --red-soft: rgba(226,71,77,.12);
+      --green: #18a558; --green-soft: rgba(24,165,88,.14); --amber:#d4810b; --amber-soft:#faf0db;
+      --ring: 0 0 0 3px rgba(79,70,229,.16);
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0a0e18; --surface: #131a27; --surface-2:#1b2434; --border: #222b3c; --border-2: #303b52;
+      --accent: #7c83ff; --accent-hov: #9499ff; --accent-soft: rgba(124,131,255,.18);
+      --text: #e9eef7; --muted: #8f9aaf; --red: #f0686d; --red-soft: rgba(240,104,109,.16);
+      --green: #3ec07f; --green-soft: rgba(62,192,127,.16); --amber:#f0a73a; --amber-soft: rgba(240,167,58,.14);
+      --ring: 0 0 0 3px rgba(124,131,255,.3);
+    }
+    body { background: radial-gradient(1100px 520px at 50% -8%, rgba(79,70,229,.14), transparent 70%), var(--bg);
+      color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 36px 20px; }
+    .wrap { width: 560px; max-width: 100%; }
+    .logo { text-align: center; margin-bottom: 22px; }
+    .logo .mark { width: 54px; height: 54px; border-radius: 16px; margin: 0 auto 12px;
+      background: linear-gradient(135deg, var(--accent), #8b5cf6); display: flex; align-items: center;
+      justify-content: center; font-size: 27px; box-shadow: 0 10px 26px rgba(79,70,229,.4); }
+    .logo h1 { font-size: 21px; font-weight: 800; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 26px;
+      box-shadow: 0 20px 50px rgba(18,24,46,.12); margin-bottom: 16px; }
+    .ok-banner { background: var(--green-soft); border: 1px solid rgba(24,165,88,.3); color: var(--green);
+      border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; font-size: 14px; }
+    .code { font-size: 24px; font-weight: 800; letter-spacing: 2px; color: var(--accent);
+      background: var(--accent-soft); border-radius: 10px; padding: 6px 14px; display: inline-block; margin-top: 6px; }
+    .badge { display: inline-block; padding: 3px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 700; }
+    .badge-green { background: var(--green-soft); color: var(--green); }
+    .badge-amber { background: var(--amber-soft); color: var(--amber); }
+    .badge-accent{ background: var(--accent-soft); color: var(--accent); }
+    .badge-gray  { background: var(--surface-2); color: var(--muted); }
+    .meta { font-size: 13px; color: var(--muted); margin-top: 12px; line-height: 1.7; }
+    .meta b { color: var(--text); font-weight: 600; }
+    .thread { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px; }
+    .msg { background: var(--surface-2); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+    .msg .who { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .msg .who b { color: var(--text); }
+    .msg .body { font-size: 14px; white-space: pre-wrap; }
+    label { display: block; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+    input, textarea { width: 100%; background: var(--surface); border: 1px solid var(--border-2);
+      border-radius: 11px; padding: 11px 13px; color: var(--text); font-size: 14px; outline: none; font-family: inherit; }
+    input:focus, textarea:focus { border-color: var(--accent); box-shadow: var(--ring); }
+    textarea { min-height: 90px; resize: vertical; }
+    .btn { padding: 11px 18px; background: var(--accent); color: #fff; border: none; border-radius: 11px;
+      font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 10px; }
+    .btn:hover { background: var(--accent-hov); }
+    .btn-ghost { background: var(--surface-2); color: var(--text); }
+    .err { color: var(--red); font-size: 14px; }
+    .hint { text-align: center; font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .hint a { color: var(--accent); text-decoration: none; }
+    h2 { font-size: 17px; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <div class="mark">🎫</div>
+    <h1>Статус заявки</h1>
+  </div>
+
+  {{if .New}}
+  <div class="ok-banner">
+    ✅ Заявка принята! Сохраните код для отслеживания:
+    <div class="code">{{.Code}}</div>
+    {{if .Found}}{{if not .Comments}}<div style="margin-top:10px">Если вы указали email — уведомления о ходе работы придут на почту.</div>{{end}}{{end}}
+  </div>
+  {{end}}
+
+  {{if .NotFound}}
+  <div class="card"><p class="err">Заявка с кодом <b>{{.Code}}</b> не найдена. Проверьте код.</p></div>
+  {{end}}
+
+  {{if .Found}}
+  <div class="card">
+    <h2>{{.Title}}</h2>
+    <span class="badge {{statusBadge .Status}}">{{.StatusRu}}</span>
+    <div class="meta">
+      Код заявки: <b>{{.Code}}</b><br>
+      {{if .Category}}Категория: <b>{{.Category}}</b><br>{{end}}
+      Создана: <b>{{.Created}}</b>{{if .Updated}} · обновлена: <b>{{.Updated}}</b>{{end}}
+    </div>
+
+    {{if .Comments}}
+    <div class="thread">
+      {{range .Comments}}
+      <div class="msg"><div class="who"><b>{{.Author}}</b> · {{.Created}}</div><div class="body">{{.Body}}</div></div>
+      {{end}}
+    </div>
+    {{end}}
+
+    <div class="thread">
+      <form method="post" action="/help/track/reply">
+        <input type="hidden" name="csrf_token" value="">
+        <input type="hidden" name="code" value="{{.Code}}">
+        <label>Добавить сообщение / уточнение</label>
+        <textarea name="body" placeholder="Например: проблема всё ещё повторяется…"></textarea>
+        <button class="btn" type="submit">Отправить</button>
+      </form>
+    </div>
+  </div>
+  {{end}}
+
+  <div class="card">
+    <form method="get" action="/help/track">
+      <label>Проверить статус по коду</label>
+      <div style="display:flex;gap:10px">
+        <input type="text" name="code" placeholder="напр. {{if .Code}}{{.Code}}{{else}}ABC123{{end}}" value="" style="text-transform:uppercase">
+        <button class="btn" type="submit" style="margin-top:0;white-space:nowrap">Проверить</button>
+      </div>
+    </form>
+  </div>
+
+  <p class="hint"><a href="/help">← Создать новую заявку</a></p>
+</div>
+
+<script>
+(function () {
+  var m = document.cookie.match('(^|;)\\s*csrf\\s*=\\s*([^;]+)');
+  var tok = m ? m.pop() : '';
+  document.querySelectorAll('input[name=csrf_token]').forEach(function (i) { i.value = tok; });
+})();
+</script>
+</body>
+</html>

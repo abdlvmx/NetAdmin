@@ -1,0 +1,38 @@
+{{define "title"}}Журнал действий{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Журнал действий</h1>
+    <div class="sub">Последние 200 записей аудита</div>
+  </div>
+</div>
+
+<div class="content">
+  <div class="toolbar">
+    <input type="text" placeholder="Поиск: пользователь, действие, объект…" data-filter-target="#audit-body">
+  </div>
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th data-sort>Время</th><th data-sort>Пользователь</th><th data-sort>Действие</th><th data-sort>Объект</th><th>Детали</th></tr>
+        </thead>
+        <tbody id="audit-body">
+          {{range .Logs}}
+          <tr>
+            <td class="text-muted" style="white-space:nowrap">{{.CreatedAt}}</td>
+            <td>{{.Username}}</td>
+            <td><span class="badge badge-accent">{{.Action}}</span></td>
+            <td>{{if .Target}}{{.Target}}{{else}}—{{end}}</td>
+            <td class="text-muted">{{if .Detail}}{{.Detail}}{{else}}—{{end}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="empty">Записей нет.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}

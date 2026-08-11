@@ -1,0 +1,70 @@
+{{define "title"}}Здоровье дисков{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Здоровье дисков</h1>
+    <div class="sub">SMART-показатели накопителей: износ SSD, температура, ошибки чтения, предсказание отказа</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  <div class="summary-grid">
+    <div class="summary-card"><div class="lbl">Всего дисков</div><div class="num">{{.Total}}</div></div>
+    <div class="summary-card"><div class="lbl">Под наблюдением (хостов)</div><div class="num">{{.Hosts}}</div></div>
+    <div class="summary-card"><div class="lbl">Предупреждения</div><div class="num {{if .Warnings}}text-amber{{end}}">{{.Warnings}}</div></div>
+    <div class="summary-card"><div class="lbl">Критические</div><div class="num {{if .Criticals}}text-red{{end}}">{{.Criticals}}</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Накопители парка</span>
+      <input class="dd-search" type="search" placeholder="Поиск по хосту/модели…" data-filter-target="#disk-body" style="margin-left:auto;min-width:220px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-size:13px">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th data-sort>Хост</th>
+          <th data-sort>Модель</th>
+          <th style="width:70px">Тип</th>
+          <th data-sort style="width:90px">Объём</th>
+          <th data-sort style="width:90px">Износ</th>
+          <th data-sort style="width:80px">Темп.</th>
+          <th data-sort style="width:110px">Наработка</th>
+          <th data-sort style="width:230px">Состояние</th>
+        </tr></thead>
+        <tbody id="disk-body">
+          {{range .Rows}}
+          <tr data-sev="{{.Severity}}">
+            <td><a href="/devices/{{.DeviceID}}"><b>{{.Hostname}}</b></a></td>
+            <td>{{if .Model}}{{.Model}}{{else}}—{{end}}{{if .Serial}}<div class="text-muted" style="font-size:12px">S/N {{.Serial}}</div>{{end}}</td>
+            <td>{{if .MediaType}}{{.MediaType}}{{else}}—{{end}}</td>
+            <td data-sort-val="{{.SizeGB}}">{{if .SizeGB}}{{.SizeGB}} ГБ{{else}}—{{end}}</td>
+            <td data-sort-val="{{.WearPct}}">
+              {{if ge .WearPct 90}}<span class="badge badge-red">{{.WearPct}}%</span>
+              {{else if ge .WearPct 80}}<span class="badge badge-amber">{{.WearPct}}%</span>
+              {{else if gt .WearPct 0}}{{.WearPct}}%{{else}}—{{end}}
+            </td>
+            <td data-sort-val="{{.Temperature}}">
+              {{if ge .Temperature 60}}<span class="badge badge-amber">{{.Temperature}}°C</span>
+              {{else if gt .Temperature 0}}{{.Temperature}}°C{{else}}—{{end}}
+            </td>
+            <td data-sort-val="{{.PowerOnHours}}" class="text-muted">{{if .PowerOnHours}}{{.PowerOnHours}} ч{{else}}—{{end}}</td>
+            <td>
+              {{if eq .Severity "critical"}}<span class="badge badge-red">⚠ {{.Issue}}</span>
+              {{else if eq .Severity "warning"}}<span class="badge badge-amber">{{.Issue}}</span>
+              {{else}}<span class="badge badge-green">исправен</span>{{end}}
+            </td>
+          </tr>
+          {{else}}
+          <tr><td colspan="8" class="empty">Данных о дисках пока нет. Появятся после сбора агентом (раз в 6 часов). Сбор SMART идёт на Windows-хостах с установленным агентом.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

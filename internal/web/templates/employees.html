@@ -1,0 +1,141 @@
+{{define "title"}}Сотрудники{{end}}
+
+{{define "empFields"}}
+<div class="form-row cols-2">
+  <div class="form-group"><label>ФИО *</label><input name="full_name" required></div>
+  <div class="form-group"><label>Должность</label><input name="position"></div>
+</div>
+<div class="form-row cols-2">
+  <div class="form-group"><label>Email</label><input name="email"></div>
+  <div class="form-group"><label>Телефон</label><input name="phone"></div>
+</div>
+<div class="form-row">
+  <div class="form-group">
+    <label>Отдел</label>
+    <select name="department_id">
+      <option value="">— не указан —</option>
+      {{range .}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+    </select>
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Заметки</label><textarea name="notes"></textarea></div>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Сотрудники</h1>
+    <div class="sub">Справочник сотрудников и отделов</div>
+  </div>
+  {{if eq .User.Role "admin"}}
+  <div class="flex gap-2">
+    <button class="btn btn-ghost" onclick="openModal('modal-dept')">+ Отдел</button>
+    <button class="btn btn-primary" onclick="openModal('modal-add')">+ Сотрудник</button>
+  </div>
+  {{end}}
+</div>
+
+<div class="content">
+  <div class="toolbar">
+    <input type="text" placeholder="Поиск: ФИО, должность, контакты…" data-filter-target="#emp-body">
+    <select data-filter-target="#emp-body" data-col="dept">
+      <option value="all">Все отделы</option>
+      {{range .Departments}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+    </select>
+    <a href="/employees/export" class="btn btn-ghost">Экспорт CSV</a>
+  </div>
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th data-sort>ФИО</th><th data-sort>Должность</th><th data-sort>Отдел</th><th>Контакты</th><th data-sort>Устройства</th><th data-sort>Статус</th><th></th></tr>
+        </thead>
+        <tbody id="emp-body">
+          {{range .Employees}}
+          <tr data-dept="{{.DepartmentName}}">
+            <td style="font-weight:600">{{.FullName}}</td>
+            <td class="text-muted">{{if .Position}}{{.Position}}{{else}}—{{end}}</td>
+            <td>{{if .DepartmentName}}{{.DepartmentName}}{{else}}—{{end}}</td>
+            <td class="text-muted" style="font-size:12px">
+              {{if .Email}}{{.Email}}{{end}}{{if .Phone}}{{if .Email}}<br>{{end}}{{.Phone}}{{end}}{{if and (not .Email) (not .Phone)}}—{{end}}
+            </td>
+            <td>{{.DevicesCount}}</td>
+            <td>{{if .IsActive}}<span class="badge badge-green">активен</span>{{else}}<span class="badge badge-gray">отключён</span>{{end}}</td>
+            <td>
+              {{if eq $.User.Role "admin"}}
+              <div class="row-actions">
+                <button class="btn btn-ghost btn-sm" onclick="openEditEmp({{.ID}})">Изменить</button>
+                <form method="post" action="/employees/{{.ID}}/toggle">
+                  <button class="btn btn-ghost btn-sm">{{if .IsActive}}Отключить{{else}}Включить{{end}}</button>
+                </form>
+              </div>
+              {{end}}
+            </td>
+          </tr>
+          {{else}}
+          <tr><td colspan="7" class="empty">Сотрудников нет.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-add" onclick="closeOnOverlay(event,'modal-add')">
+  <div class="modal modal-wide">
+    <h3>Добавить сотрудника</h3>
+    <form method="post" action="/employees/create">
+      {{template "empFields" .Departments}}
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add')">Отмена</button>
+        <button type="submit" class="btn btn-primary">Добавить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-edit" onclick="closeOnOverlay(event,'modal-edit')">
+  <div class="modal modal-wide">
+    <h3>Изменить сотрудника</h3>
+    <form method="post" action="" id="edit-form">
+      {{template "empFields" .Departments}}
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-edit')">Отмена</button>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-dept" onclick="closeOnOverlay(event,'modal-dept')">
+  <div class="modal">
+    <h3>Новый отдел</h3>
+    <form method="post" action="/departments/create">
+      <div class="form-group"><label>Название отдела</label><input name="name" required></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-dept')">Отмена</button>
+        <button type="submit" class="btn btn-primary">Создать</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+const EMPLOYEES = {{.EmployeesJSON}} || [];
+const EFIELDS = ["full_name","position","email","phone","department_id","notes"];
+function openModal(id){ document.getElementById(id).classList.add('open'); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+function closeOnOverlay(e,id){ if(e.target===e.currentTarget) closeModal(id); }
+function openEditEmp(id){
+  const e = EMPLOYEES.find(x=>x.id===id); if(!e) return;
+  const form = document.getElementById('edit-form');
+  form.action = `/employees/${id}/update`;
+  EFIELDS.forEach(n=>{ const el=form.elements[n]; if(el) el.value = n==="department_id" ? (e.department_id||"") : (e[n]||""); });
+  openModal('modal-edit');
+}
+</script>
+{{end}}

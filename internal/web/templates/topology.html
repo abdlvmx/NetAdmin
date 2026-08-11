@@ -1,0 +1,81 @@
+{{define "title"}}Зависимости{{end}}
+
+{{define "extra_head"}}
+<style>
+  .impact { background: var(--red-soft); border: 1px solid var(--red); border-radius: var(--radius-sm);
+    padding: 12px 16px; margin-bottom: 10px; }
+  .impact .head { font-weight: 700; color: var(--red); margin-bottom: 4px; }
+  .topo-add { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .topo-add .fld { display: flex; flex-direction: column; gap: 4px; }
+  .topo-add label { font-size: 12px; color: var(--muted); }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Зависимости устройств</h1>
+    <div class="sub">Карта зависимостей (родитель → зависимые) и влияние при сбое узла</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  {{if .Msg}}<div class="banner">{{.Msg}}</div>{{end}}
+
+  {{if .Impacts}}
+  <div class="card" style="margin-bottom:18px;border-color:var(--red)">
+    <div class="card-header"><span class="card-title text-red">⚠️ Влияние сбоев</span></div>
+    {{range .Impacts}}
+    <div class="impact">
+      <div class="head">{{.Parent}} недоступен — затронуты зависимые:</div>
+      <div>{{range $i, $d := .Dependents}}{{if $i}}, {{end}}{{$d}}{{end}}</div>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if eq .User.Role "admin"}}
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><span class="card-title">Добавить зависимость</span></div>
+    <div style="padding:14px 18px">
+      <form method="post" action="/topology/add" class="topo-add">
+        <div class="fld"><label>Узел (от чего зависит)</label>
+          <select name="parent_device_id" style="min-width:200px">{{range .Devices}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></div>
+        <div class="fld"><label>Зависимый узел</label>
+          <select name="child_device_id" style="min-width:200px">{{range .Devices}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></div>
+        <div class="fld"><label>Порт / примечание</label><input name="port" placeholder="напр. eth0 / SQL" style="width:160px"></div>
+        <button class="btn btn-primary">Связать</button>
+      </form>
+      <div class="text-muted" style="font-size:12px;margin-top:8px">«Зависимый узел» перестаёт работать, если «Узел» недоступен (напр. 1С зависит от SQL Server).</div>
+    </div>
+  </div>
+  {{end}}
+
+  <div class="card">
+    <div class="card-header"><span class="card-title">Связи</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Узел</th><th style="width:40px"></th><th>Зависимый</th><th style="width:160px">Порт / примечание</th>{{if eq .User.Role "admin"}}<th style="width:90px"></th>{{end}}</tr></thead>
+        <tbody>
+          {{range .Links}}
+          <tr>
+            <td><b>{{.Parent}}</b></td>
+            <td class="text-muted">→</td>
+            <td>{{.Child}}{{if .ChildOffline}} <span class="badge badge-red">оффлайн</span>{{end}}</td>
+            <td class="text-muted">{{if .Port}}{{.Port}}{{else}}—{{end}}</td>
+            {{if eq $.User.Role "admin"}}
+            <td><form method="post" action="/topology/{{.ID}}/delete" onsubmit="return confirm('Удалить связь?')"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
+            {{end}}
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="empty">Связей нет. Добавьте зависимости, чтобы видеть влияние сбоев.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

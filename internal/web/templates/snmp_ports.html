@@ -1,0 +1,46 @@
+{{define "title"}}Порты — {{.Device}}{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Порты: {{.Device}}</h1>
+    <div class="sub"><a href="/snmp" style="color:var(--accent)">← SNMP-устройства</a> · {{.IP}} · активно {{.UpCount}} из {{.Total}}</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  <div class="toolbar">
+    <input type="text" placeholder="Поиск по портам…" data-filter-target="#ports-body">
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Интерфейсы</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th data-sort>Интерфейс</th>
+          <th data-sort style="width:110px">Статус</th>
+          <th data-sort style="width:150px">Входящий</th>
+          <th data-sort style="width:150px">Исходящий</th>
+          <th data-sort style="width:130px">Скорость</th>
+        </tr></thead>
+        <tbody id="ports-body">
+          {{range .Rows}}
+          <tr>
+            <td><b>{{.Name}}</b></td>
+            <td>{{if .Up}}<span class="badge badge-green">up</span>{{else}}<span class="badge badge-gray">down</span>{{end}}</td>
+            <td class="text-muted">↓ {{.InRate}}</td>
+            <td class="text-muted">↑ {{.OutRate}}</td>
+            <td class="text-muted">{{.Speed}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="empty">Данных по портам пока нет. Появятся после двух опросов устройства (для расчёта скорости нужен интервал).</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

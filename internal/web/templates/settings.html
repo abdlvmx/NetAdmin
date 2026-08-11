@@ -1,0 +1,128 @@
+{{define "title"}}Настройки{{end}}
+
+{{define "extra_head"}}
+<style>
+  .banner { border-radius: 9px; padding: 10px 14px; font-size: 13px; margin-bottom: 18px; }
+  .banner.ok { background: var(--green-soft); color: var(--green); }
+  .banner.err { background: var(--red-soft); color: var(--red); }
+  .token-box { display: flex; gap: 10px; align-items: center; }
+  .token-box input { font-family: ui-monospace, monospace; font-size: 12px; }
+  .settings-grid { display: grid; gap: 16px; max-width: 640px; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Настройки</h1>
+    <div class="sub">Организация, агент и безопасность</div>
+  </div>
+</div>
+
+<div class="content">
+  {{if .Message}}
+  <div class="banner ok">
+    {{if eq .Message "organization_saved"}}Название организации сохранено.
+    {{else if eq .Message "agent_token_rotated"}}Токен агента обновлён. Обновите его на всех агентах.
+    {{else if eq .Message "notifications_saved"}}Настройки уведомлений сохранены.
+    {{else if eq .Message "scan_saved"}}Настройки автосканирования сохранены.
+    {{else if eq .Message "helpdesk_saved"}}Настройки портала заявок сохранены.
+    {{else if eq .Message "test_sent"}}Тестовое письмо отправлено.
+    {{else}}Сохранено.{{end}}
+  </div>
+  {{end}}
+  {{if .Error}}
+  <div class="banner err">
+    {{if eq .Error "test_failed"}}Не удалось отправить письмо. Проверьте настройки SMTP.
+    {{else}}Ошибка.{{end}}
+  </div>
+  {{end}}
+
+  <div class="settings-grid">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Организация</span></div>
+      <form method="post" action="/settings/organization">
+        <div class="form-group"><label>Название организации</label>
+          <input name="organization_name" value="{{.OrgName}}"></div>
+        <div class="modal-footer"><button class="btn btn-primary">Сохранить</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Токен агента</span></div>
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Используется агентами для авторизации heartbeat и событий. Храните в тайне.</p>
+      <div class="token-box">
+        <input value="{{.AgentToken}}" readonly onclick="this.select()">
+        <form method="post" action="/settings/agent-token/rotate"
+              onsubmit="return confirm('Обновить токен? Старый перестанет работать.')">
+          <button class="btn btn-ghost">Обновить</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Автосканирование сети</span></div>
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Периодический поиск устройств в сети. Новый MAC, которого не было в базе,
+        создаёт критический инцидент (rogue-устройство). 0 — выключено.</p>
+      <form method="post" action="/settings/scan">
+        <div class="form-group"><label>Интервал, часов (0 — выкл)</label>
+          <input type="number" name="scan_interval_hours" min="0" max="168" value="{{.ScanIntervalHours}}"></div>
+        <div class="modal-footer"><button class="btn btn-primary">Сохранить</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Портал заявок сотрудников</span></div>
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Публичная страница <a href="/help" target="_blank" style="color:var(--accent)">/help</a> (без логина), где
+        сотрудники оставляют заявки в ИТ-службу. Доступна всем в локальной сети. Защита от спама — ограничение частоты по IP.</p>
+      <form method="post" action="/settings/helpdesk">
+        <label class="ck" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;margin-bottom:12px">
+          <input type="checkbox" name="helpdesk_enabled" value="1" style="width:auto"{{if .HelpdeskEnabled}} checked{{end}}> Принимать заявки через портал
+        </label>
+        <div class="modal-footer"><button class="btn btn-primary">Сохранить</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Уведомления (Email / SMTP)</span></div>
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Письма о важных событиях. Укажите SMTP-сервер (корпоративный или Яндекс/Mail с паролем
+        приложения). Порт <b>587</b> — STARTTLS, <b>465</b> — SSL/TLS. Пусто — уведомления отключены.</p>
+      <form method="post" action="/settings/notifications">
+        <div class="form-row cols-2">
+          <div class="form-group"><label>SMTP-сервер</label>
+            <input name="smtp_host" value="{{.SMTPHost}}" placeholder="smtp.yandex.ru"></div>
+          <div class="form-group"><label>Порт</label>
+            <input name="smtp_port" type="number" value="{{if .SMTPPort}}{{.SMTPPort}}{{end}}" placeholder="587"></div>
+        </div>
+        <div class="form-row cols-2">
+          <div class="form-group"><label>Логин</label>
+            <input name="smtp_user" value="{{.SMTPUser}}" placeholder="user@yandex.ru"></div>
+          <div class="form-group"><label>Пароль</label>
+            <input name="smtp_pass" type="password" placeholder="оставьте пустым, чтобы не менять"></div>
+        </div>
+        <div class="form-row cols-2">
+          <div class="form-group"><label>От кого (From)</label>
+            <input name="smtp_from" value="{{.SMTPFrom}}" placeholder="netadmin@company.ru"></div>
+          <div class="form-group"><label>Кому (через запятую)</label>
+            <input name="smtp_to" value="{{.SMTPTo}}" placeholder="admin@company.ru, it@company.ru"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary">Сохранить</button>
+        </div>
+      </form>
+      <form method="post" action="/settings/notifications/test" style="margin-top:6px">
+        <button class="btn btn-ghost">Отправить тест</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Пароль</span></div>
+      <p class="text-muted" style="font-size:13px">Смена пароля — на странице <a href="/profile" style="color:var(--accent)">Профиль</a>.</p>
+    </div>
+  </div>
+</div>
+{{end}}

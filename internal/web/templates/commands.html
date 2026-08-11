@@ -1,0 +1,114 @@
+{{define "title"}}Команды{{end}}
+
+{{define "extra_head"}}
+<style>
+  .cmd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 900px){ .cmd-grid { grid-template-columns: 1fr; } }
+  .dev-list { max-height: 260px; overflow:auto; border:1px solid var(--border); border-radius:11px; padding:10px 12px; }
+  .dev-list label { display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--text); padding:3px 0; cursor:pointer; }
+  .dev-list input { width:auto; }
+  .cmd-hint { font-size:12px; color:var(--muted); margin-top:4px; }
+  .danger-note { color: var(--amber); }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Команды</h1>
+    <div class="sub">Запуск действий из готовой библиотеки на ПК с агентом · выполняется в течение минуты</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  {{if .Msg}}<div class="banner">{{.Msg}}</div>{{end}}
+
+  {{if .User.CanWrite}}
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><span class="card-title">Запустить команду</span></div>
+    <form method="post" action="/commands/run" style="padding:14px 18px" onsubmit="return confirmRun()">
+      <div class="cmd-grid">
+        <div>
+          <div class="form-group">
+            <label>Команда</label>
+            <select name="cmd" id="cmd-select" required>
+              <option value="">— выберите действие —</option>
+              {{range .Library}}<option value="{{.Key}}" data-danger="{{if .Danger}}1{{end}}" data-desc="{{.Desc}}">{{.Name}}{{if .Danger}} ⚠{{end}}</option>{{end}}
+            </select>
+            <div class="cmd-hint" id="cmd-desc"></div>
+          </div>
+        </div>
+        <div>
+          <div class="form-group">
+            <label>Где выполнить</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:8px;cursor:pointer">
+              <input type="checkbox" name="all" value="1" id="all-cb" style="width:auto" onchange="document.getElementById('dev-list').style.display=this.checked?'none':'block'"> Все ПК с агентом ({{len .Devices}})
+            </label>
+            <div class="dev-list" id="dev-list">
+              {{range .Devices}}<label><input type="checkbox" name="device" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="text-muted">Нет ПК с установленным агентом.</span>{{end}}
+            </div>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Выполнить</button>
+    </form>
+  </div>
+  {{end}}
+
+  <div class="toolbar">
+    <input type="text" placeholder="Поиск: ПК, команда…" data-filter-target="#cmd-body">
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">История запусков</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th data-sort style="width:150px">Время</th>
+          <th data-sort>Устройство</th>
+          <th data-sort>Команда</th>
+          <th data-sort style="width:120px">Статус</th>
+          <th>Результат</th>
+        </tr></thead>
+        <tbody id="cmd-body">
+          {{range .Recent}}
+          <tr>
+            <td class="text-muted" style="white-space:nowrap">{{.Created}}</td>
+            <td>{{.Device}}</td>
+            <td>{{.Command}}</td>
+            <td>
+              {{if eq .Status "done"}}<span class="badge badge-green">выполнено</span>
+              {{else if eq .Status "failed"}}<span class="badge badge-red">ошибка</span>
+              {{else if eq .Status "sent"}}<span class="badge badge-accent">отправлено</span>
+              {{else}}<span class="badge badge-amber">ожидает</span>{{end}}
+            </td>
+            <td class="text-muted" style="word-break:break-word">{{if .Result}}{{.Result}}{{else}}—{{end}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="empty">Команды ещё не запускались.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+const sel = document.getElementById('cmd-select');
+if(sel){
+  sel.addEventListener('change', function(){
+    const o = sel.options[sel.selectedIndex];
+    document.getElementById('cmd-desc').textContent = o ? (o.dataset.desc||'') : '';
+  });
+}
+function confirmRun(){
+  const o = sel.options[sel.selectedIndex];
+  if(o && o.dataset.danger==='1'){
+    return confirm('Эта команда прервёт работу пользователя. Выполнить?');
+  }
+  return true;
+}
+</script>
+{{end}}

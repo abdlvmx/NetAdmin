@@ -1,0 +1,11 @@
+/netadmin.exe
+/agent.exe
+/_testdata/
+/_t/
+*.db
+*.db-shm
+*.db-wal
+config.json
+cert.pem
+key.pem
+agent_state.json

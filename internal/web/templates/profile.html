@@ -1,0 +1,64 @@
+{{define "title"}}Профиль{{end}}
+
+{{define "extra_head"}}
+<style>
+  .banner { border-radius: 9px; padding: 10px 14px; font-size: 13px; margin-bottom: 18px; }
+  .banner.ok { background: var(--green-soft); color: var(--green); }
+  .banner.err { background: var(--red-soft); color: var(--red); }
+  .settings-grid { display: grid; gap: 16px; max-width: 560px; }
+  .kv { display: flex; justify-content: space-between; padding: 7px 0; font-size: 14px; border-bottom: 1px solid var(--border); }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Профиль</h1>
+    <div class="sub">Ваша учётная запись и пароль</div>
+  </div>
+</div>
+
+<div class="content">
+  {{if .Message}}
+  <div class="banner ok">{{if eq .Message "password_changed"}}Пароль изменён. Остальные сессии завершены.{{else}}Сохранено.{{end}}</div>
+  {{end}}
+  {{if .Error}}
+  <div class="banner err">
+    {{if eq .Error "bad_current_password"}}Неверный текущий пароль.
+    {{else if eq .Error "weak_password"}}Пароль должен быть не короче 8 символов и содержать буквы и цифры.
+    {{else if eq .Error "password_mismatch"}}Новые пароли не совпадают.
+    {{else}}Ошибка.{{end}}
+  </div>
+  {{end}}
+
+  <div class="settings-grid">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Учётная запись</span></div>
+      <div class="kv"><span class="k">Логин</span><span>{{.User.Username}}</span></div>
+      {{if .User.FullName}}<div class="kv"><span class="k">Имя</span><span>{{.User.FullName}}</span></div>{{end}}
+      <div class="kv"><span class="k">Роль</span><span>
+        {{if eq .User.Role "admin"}}<span class="badge badge-accent">администратор</span>
+        {{else if eq .User.Role "viewer"}}<span class="badge badge-gray">наблюдатель</span>
+        {{else}}<span class="badge badge-gray">оператор</span>{{end}}
+      </span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Смена пароля</span></div>
+      <form method="post" action="/settings/password">
+        <div class="form-group" style="margin-bottom:12px"><label>Текущий пароль</label>
+          <input type="password" name="current_password" required></div>
+        <div class="form-row cols-2">
+          <div class="form-group"><label>Новый пароль</label>
+            <input type="password" name="new_password" required minlength="8"></div>
+          <div class="form-group"><label>Повтор пароля</label>
+            <input type="password" name="new_password_repeat" required minlength="8"></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-primary">Изменить пароль</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+{{end}}

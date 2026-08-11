@@ -1,0 +1,81 @@
+{{define "title"}}Изменения сети{{end}}
+
+{{define "extra_head"}}
+<style>
+  .nc-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+  .nc-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 18px; box-shadow: var(--shadow); }
+  .nc-card .lbl { font-size: 12px; color: var(--muted); }
+  .nc-card .num { font-size: 24px; font-weight: 750; margin-top: 6px; letter-spacing: -0.5px; }
+  .nc-type { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 20px; }
+  .nc-new { background: var(--green-soft); color: var(--green); }
+  .nc-gone { background: var(--red-soft); color: var(--red); }
+  .nc-changed { background: var(--accent-soft); color: var(--accent); }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Изменения сети</h1>
+    <div class="sub">Новые, исчезнувшие и изменившиеся устройства · по результатам сканов</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  <div class="nc-summary">
+    <div class="nc-card"><div class="lbl">Всего записей</div><div class="num">{{.All}}</div></div>
+    <div class="nc-card"><div class="lbl">Новые</div><div class="num text-green">{{.New}}</div></div>
+    <div class="nc-card"><div class="lbl">Исчезнувшие</div><div class="num">{{.Gone}}</div></div>
+    <div class="nc-card"><div class="lbl">Изменившиеся</div><div class="num">{{.Changed}}</div></div>
+  </div>
+
+  <div class="toolbar">
+    <input type="text" id="nc-search" placeholder="Поиск: IP, MAC, имя, вендор…" data-filter-target="#nc-body">
+    <select data-filter-target="#nc-body" data-col="type">
+      <option value="">Все типы</option>
+      <option value="new">Новые</option>
+      <option value="gone">Исчезнувшие</option>
+      <option value="changed">Изменившиеся</option>
+    </select>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Журнал изменений</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort style="width:140px">Время</th>
+            <th style="width:120px">Тип</th>
+            <th style="width:130px">IP</th>
+            <th>Устройство</th>
+            <th style="width:160px">MAC</th>
+            <th>Подробности</th>
+          </tr>
+        </thead>
+        <tbody id="nc-body">
+          {{range .Rows}}
+          <tr data-type="{{.Type}}">
+            <td class="text-muted" style="white-space:nowrap">{{.Ts}}</td>
+            <td>
+              {{if eq .Type "new"}}<span class="nc-type nc-new">новое</span>
+              {{else if eq .Type "gone"}}<span class="nc-type nc-gone">исчезло</span>
+              {{else}}<span class="nc-type nc-changed">изменилось</span>{{end}}
+            </td>
+            <td>{{if .IP}}{{.IP}}{{else}}—{{end}}</td>
+            <td>{{if .Hostname}}{{.Hostname}}{{else}}<span class="text-muted">—</span>{{end}}{{if .Vendor}}<div class="text-muted" style="font-size:11.5px">{{.Vendor}}</div>{{end}}</td>
+            <td class="text-muted" style="word-break:break-all">{{if .MAC}}{{.MAC}}{{else}}—{{end}}</td>
+            <td class="text-muted">{{if .Detail}}{{.Detail}}{{else}}—{{end}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="6" class="empty">Изменений пока нет. Появятся после повторных сканов сети.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

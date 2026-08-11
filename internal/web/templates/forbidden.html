@@ -1,0 +1,90 @@
+{{define "title"}}Запрещённое ПО{{end}}
+
+{{define "extra_head"}}
+<style>
+  .fb-add { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .fb-add .fld { display: flex; flex-direction: column; gap: 4px; }
+  .fb-add label { font-size: 12px; color: var(--muted); }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Аудит запрещённого ПО</h1>
+    <div class="sub">Поиск нежелательных программ (игры, торренты, майнеры) по инвентарю · только учёт, без блокировки</div>
+  </div>
+  <div class="datechip">📅 {{today}}</div>
+</div>
+
+<div class="content">
+  {{if .Msg}}<div class="banner">{{.Msg}}</div>{{end}}
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="lbl">Правил в списке</div><div class="num">{{len .Rules}}</div></div>
+    <div class="summary-card"><div class="lbl">Находок</div><div class="num {{if .Findings}}text-red{{end}}">{{len .Findings}}</div></div>
+    <div class="summary-card"><div class="lbl">Затронуто ПК</div><div class="num {{if .AffectedHosts}}text-red{{end}}">{{.AffectedHosts}}</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><span class="card-title">⚠️ Найдено на компьютерах</span></div>
+    <div class="toolbar">
+      <input type="text" id="fb-search" placeholder="Поиск: хост, ПО…" data-filter-target="#fb-find">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-sort>Хост</th><th>Программа</th><th data-sort style="width:140px">Категория</th></tr></thead>
+        <tbody id="fb-find">
+          {{range .Findings}}
+          <tr>
+            <td><b>{{.Hostname}}</b></td>
+            <td>{{.Software}}</td>
+            <td><span class="badge badge-red">{{.Category}}</span></td>
+          </tr>
+          {{else}}
+          <tr><td colspan="3" class="empty">Запрещённого ПО не найдено. {{if not .Rules}}Сначала добавьте правила ниже (или типовой набор).{{end}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {{if eq .User.Role "admin"}}
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Чёрный список</span>
+      <form method="post" action="/forbidden/seed"><button class="btn btn-ghost btn-sm">Добавить типовой набор</button></form>
+    </div>
+    <div style="padding:0 4px 14px">
+      <form method="post" action="/forbidden/add" class="fb-add" style="margin-bottom:14px">
+        <div class="fld" style="flex:1;min-width:200px"><label>Название ПО (подстрока)</label>
+          <input name="pattern" placeholder="напр. uTorrent" required></div>
+        <div class="fld"><label>Категория</label>
+          <input name="category" placeholder="Игры / Торренты / Майнеры" style="min-width:170px"></div>
+        <div class="fld" style="flex:1;min-width:160px"><label>Примечание</label><input name="note" placeholder="необязательно"></div>
+        <button class="btn btn-primary">Добавить</button>
+      </form>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th data-sort>Шаблон</th><th data-sort style="width:160px">Категория</th><th>Примечание</th><th style="width:90px"></th></tr></thead>
+          <tbody>
+            {{range .Rules}}
+            <tr>
+              <td><b>{{.Pattern}}</b></td>
+              <td>{{.Category}}</td>
+              <td class="text-muted">{{if .Note}}{{.Note}}{{else}}—{{end}}</td>
+              <td><form method="post" action="/forbidden/{{.ID}}/delete" onsubmit="return confirm('Удалить правило?')"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
+            </tr>
+            {{else}}
+            <tr><td colspan="4" class="empty">Список пуст. Нажмите «Добавить типовой набор» или внесите правила вручную.</td></tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}
