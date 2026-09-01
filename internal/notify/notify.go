@@ -31,7 +31,9 @@ func CriticalEvent(hostname, message string) {
 // Если SMTP не настроен или адрес пуст — тихо ничего не делает.
 func Email(to, subject, body string) {
 	cfg := config.Load()
-	if cfg.SMTPHost == "" || cfg.SMTPFrom == "" || strings.TrimSpace(to) == "" {
+	// адрес заявителя приходит из публичной формы — проверяем его отдельно
+	to = strings.TrimSpace(to)
+	if cfg.SMTPHost == "" || !validAddr(cfg.SMTPFrom) || !validAddr(to) {
 		return
 	}
 	go func() {
@@ -66,12 +68,27 @@ func smtpConfigured(cfg config.Config) bool {
 	return cfg.SMTPHost != "" && cfg.SMTPFrom != "" && strings.TrimSpace(cfg.SMTPTo) != ""
 }
 
+// validAddr отсеивает адреса с управляющими символами и пробелами. Такой адрес
+// попадает и в заголовок письма, и в SMTP-команду RCPT: перевод строки внутри
+// него позволяет дописать собственные заголовки или команды.
+func validAddr(s string) bool {
+	if s == "" || len(s) > 320 {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x21 || r == 0x7f || r == ',' || r == ';' || r == '<' || r == '>' {
+			return false
+		}
+	}
+	return strings.Count(s, "@") == 1
+}
+
 // recipients разбирает список получателей (через запятую/точку с запятой/пробел).
 func recipients(s string) []string {
 	f := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\n' })
 	var out []string
 	for _, x := range f {
-		if x = strings.TrimSpace(x); x != "" {
+		if x = strings.TrimSpace(x); validAddr(x) {
 			out = append(out, x)
 		}
 	}
@@ -98,8 +115,13 @@ func sendMail(cfg config.Config, subject, body string) error {
 // sendMailTo отправляет письмо заданным получателям: порт 465 — неявный TLS,
 // иначе STARTTLS (если поддержан сервером).
 func sendMailTo(cfg config.Config, to []string, subject, body string) error {
-	if cfg.SMTPHost == "" || cfg.SMTPFrom == "" || len(to) == 0 {
+	if cfg.SMTPHost == "" || !validAddr(cfg.SMTPFrom) || len(to) == 0 {
 		return errors.New("SMTP не настроен")
+	}
+	for _, r := range to {
+		if !validAddr(r) {
+			return errors.New("некорректный адрес получателя")
+		}
 	}
 	port := cfg.SMTPPort
 	if port == 0 {

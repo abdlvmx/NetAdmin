@@ -34,6 +34,12 @@ func (a *App) UsersPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
+	// список логинов, ролей и почты — сведения для администрирования:
+	// оператору и наблюдателю они не нужны
+	if !user.IsAdmin() {
+		http.Redirect(w, r, "/dashboard", http.StatusFound)
+		return
+	}
 	var all []userRow
 	rows, err := a.DB.Query(`
 		SELECT id, username, COALESCE(full_name,''), COALESCE(email,''), role, is_active,
@@ -102,6 +108,10 @@ func (a *App) ToggleUser(w http.ResponseWriter, r *http.Request) {
 	if a.DB.QueryRow("SELECT username, is_active FROM users WHERE id=?", id).Scan(&name, &active) == nil {
 		newStatus := 1 - active
 		a.DB.Exec("UPDATE users SET is_active=? WHERE id=?", newStatus, id)
+		if newStatus == 0 {
+			// доступ должен пропасть сразу, а не с истечением выданной сессии
+			auth.DeleteUserSessions(a.DB, id)
+		}
 		auth.LogAction(a.DB, admin.ID, "toggle_user", name, "active="+strconv.Itoa(newStatus))
 	}
 	http.Redirect(w, r, "/users", http.StatusSeeOther)
@@ -119,6 +129,7 @@ func (a *App) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		var name string
 		if a.DB.QueryRow("SELECT username FROM users WHERE id=?", id).Scan(&name) == nil {
 			a.DB.Exec("DELETE FROM users WHERE id=?", id)
+			auth.DeleteUserSessions(a.DB, id) // осиротевшие сессии не оставляем
 			auth.LogAction(a.DB, admin.ID, "delete_user", name, "")
 		}
 	}

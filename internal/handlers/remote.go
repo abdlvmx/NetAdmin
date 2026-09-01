@@ -137,7 +137,11 @@ func (a *App) DeviceRDP(w http.ResponseWriter, r *http.Request) {
 	if fname == "" {
 		fname = target
 	}
-	rdp := "full address:s:" + target + "\r\n" +
+	// hostname и ip попадают сюда из карточки устройства, а имя приходит от
+	// агента при регистрации. Перевод строки внутри значения позволил бы
+	// дописать в файл произвольные настройки RDP (например, alternate shell)
+	// и выполнить код на машине администратора, открывшего файл.
+	rdp := "full address:s:" + rdpValue(target) + "\r\n" +
 		"prompt for credentials:i:1\r\n" +
 		"administrative session:i:0\r\n" +
 		"screen mode id:i:2\r\n"
@@ -146,9 +150,23 @@ func (a *App) DeviceRDP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(rdp))
 }
 
+// rdpValue готовит значение для .rdp-файла: управляющие символы и переводы
+// строк вырезаются, иначе значение «разрывает» файл и дописывает свои строки.
+func rdpValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // sanitizeFilename убирает из имени файла небезопасные символы.
 func sanitizeFilename(s string) string {
 	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1 // управляющие символы в заголовке Content-Disposition
+		}
 		if strings.ContainsRune(`\/:*?"<>|`, r) {
 			return '_'
 		}

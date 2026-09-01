@@ -117,7 +117,8 @@ func loadState() agentState {
 
 func saveState(s agentState) {
 	if b, err := json.Marshal(s); err == nil {
-		_ = os.WriteFile(statePath(), b, 0o644)
+		// в файле лежит токен устройства (на Windows — под DPAPI)
+		_ = os.WriteFile(statePath(), b, 0o600)
 	}
 }
 

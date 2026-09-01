@@ -1,6 +1,6 @@
 # NetAdmin
 
-![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![No external deps](https://img.shields.io/badge/dependencies-none%20at%20runtime-blue)
@@ -324,7 +324,14 @@ nssm start NetAdminAgent
 **Аутентификация и доступ.** Пароли — bcrypt; парольная политика (≥8 символов, буквы и
 цифры); три роли; блокировка входа по IP и по учётной записи (5 неудач → 5 мин); аудит
 входов с IP, включая неудачные; ротация сессии при входе (anti-fixation); idle-timeout
-20 минут.
+20 минут. Дополнительно:
+
+- **в базе лежит только хеш токена сессии.** Доступ к файлу `netadmin.db` или к его
+  резервной копии не позволяет выдать себя за вошедшего пользователя;
+- **отключение учётной записи действует немедленно** — активные сессии гасятся сразу,
+  а не доживают до истечения срока;
+- **время ответа при входе постоянно.** Пароль сверяется даже когда учётной записи нет:
+  иначе по скорости отказа можно было бы перебрать существующие логины.
 
 **Веб-интерфейс.** CSRF-защита форм (double-submit, заголовок `X-CSRF-Token`);
 security-заголовки (CSP, `X-Frame-Options: DENY`, `nosniff`); httpOnly-cookie сессии;
@@ -361,6 +368,9 @@ security-заголовки (CSP, `X-Frame-Options: DENY`, `nosniff`); httpOnly-
   только локальная подсеть) — фильтр в приложении не заменяет сетевой;
 - ограничить доступ к каталогу данных — там `config.json` с токенами;
 - не выносить веб-интерфейс за пределы контролируемой сети.
+
+Файл `config.json` создаётся с правами только для владельца (`0600`) — в нём
+enrollment-токен и пароль SMTP. То же для `agent_state.json` на стороне агента.
 
 ---
 

@@ -57,9 +57,17 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 
 	var id int64
 	var hash string
-	row := a.DB.QueryRow(
-		"SELECT id, password_hash FROM users WHERE username=? AND is_active=1", username)
-	if err := row.Scan(&id, &hash); err != nil || !auth.VerifyPassword(password, hash) {
+	err := a.DB.QueryRow(
+		"SELECT id, password_hash FROM users WHERE username=? AND is_active=1", username).Scan(&id, &hash)
+	// Пароль сверяем всегда, даже когда учётки нет: иначе быстрый отказ выдавал
+	// бы существующие логины — по времени ответа их можно перебрать.
+	ok := false
+	if err != nil {
+		auth.VerifyDummy(password)
+	} else {
+		ok = auth.VerifyPassword(password, hash)
+	}
+	if !ok {
 		loginLimiter.fail(ip)
 		userLockout.fail(username)
 		auth.LogAction(a.DB, 0, "login_failed", username, ip)

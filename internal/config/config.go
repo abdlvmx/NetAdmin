@@ -73,7 +73,8 @@ func Save(c Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ConfigPath(), data, 0o644)
+	// в файле лежат enrollment-токен и пароль SMTP — доступ только владельцу
+	return os.WriteFile(ConfigPath(), data, 0o600)
 }
 
 // GenerateToken возвращает новый токен агента (для ротации в настройках).

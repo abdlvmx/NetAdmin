@@ -3,9 +3,11 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"net/http"
+	"sync"
 	"time"
 	"unicode"
 
@@ -64,7 +66,35 @@ func VerifyPassword(pw, hash string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw)) == nil
 }
 
-// CreateSession создаёт сессию (8ч жизни, idle-таймаут отдельно) и возвращает токен.
+// dummyHash считается лениво и один раз. Нужен, чтобы вход под несуществующим
+// логином занимал столько же времени, сколько под существующим.
+var dummyHash = sync.OnceValue(func() string {
+	h, err := bcrypt.GenerateFromPassword([]byte("netadmin-nonexistent-account"), bcrypt.DefaultCost)
+	if err != nil {
+		return ""
+	}
+	return string(h)
+})
+
+// VerifyDummy тратит столько же времени, сколько проверка настоящего пароля.
+// Вызывается, когда учётной записи нет: иначе быстрый отказ выдавал бы, какие
+// логины существуют, — по времени ответа их можно перебрать.
+func VerifyDummy(pw string) {
+	if h := dummyHash(); h != "" {
+		_ = VerifyPassword(pw, h)
+	}
+}
+
+// hashToken — то, что хранится в таблице сессий. Сам токен лежит только в
+// cookie у клиента: доступ к файлу БД или к её копии не должен давать
+// возможности выдать себя за вошедшего пользователя.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// CreateSession создаёт сессию (8ч жизни, idle-таймаут отдельно) и возвращает
+// токен для cookie. В базу пишется только его хеш.
 func CreateSession(db *sql.DB, userID int64) (string, error) {
 	token := randomHex(32)
 	now := time.Now().UTC()
@@ -72,7 +102,7 @@ func CreateSession(db *sql.DB, userID int64) (string, error) {
 	la := now.Format(sqlTimeLayout)
 	_, err := db.Exec(
 		"INSERT INTO sessions (token, user_id, expires_at, last_activity) VALUES (?,?,?,?)",
-		token, userID, expires, la,
+		hashToken(token), userID, expires, la,
 	)
 	return token, err
 }
@@ -84,10 +114,13 @@ func CurrentUser(db *sql.DB, r *http.Request) *User {
 	if err != nil || c.Value == "" {
 		return nil
 	}
+	tok := hashToken(c.Value)
+	// is_active проверяется здесь, а не только при входе: иначе отключённая
+	// учётная запись продолжала бы работать по выданной ранее сессии.
 	row := db.QueryRow(`
 		SELECT u.id, u.username, u.full_name, u.email, u.role, u.is_active, COALESCE(s.last_activity,'')
 		FROM sessions s JOIN users u ON s.user_id = u.id
-		WHERE s.token = ? AND s.expires_at > datetime('now')`, c.Value)
+		WHERE s.token = ? AND s.expires_at > datetime('now') AND u.is_active = 1`, tok)
 	var u User
 	var fullName, email sql.NullString
 	var la string
@@ -104,18 +137,30 @@ func CurrentUser(db *sql.DB, r *http.Request) *User {
 			return nil
 		}
 		if now.Sub(t) > touchInterval {
-			db.Exec("UPDATE sessions SET last_activity=? WHERE token=?", now.Format(sqlTimeLayout), c.Value)
+			db.Exec("UPDATE sessions SET last_activity=? WHERE token=?", now.Format(sqlTimeLayout), tok)
 		}
 	} else {
 		// нет/битое last_activity (легаси-сессия) — проставляем текущее
-		db.Exec("UPDATE sessions SET last_activity=? WHERE token=?", now.Format(sqlTimeLayout), c.Value)
+		db.Exec("UPDATE sessions SET last_activity=? WHERE token=?", now.Format(sqlTimeLayout), tok)
 	}
 	return &u
 }
 
 // DeleteSession удаляет сессию по токену (выход).
 func DeleteSession(db *sql.DB, token string) {
-	_, _ = db.Exec("DELETE FROM sessions WHERE token = ?", token)
+	_, _ = db.Exec("DELETE FROM sessions WHERE token = ?", hashToken(token))
+}
+
+// DeleteUserSessions гасит все сессии пользователя — при отключении или
+// удалении учётной записи доступ должен пропадать сразу, а не по истечении
+// срока ранее выданной сессии.
+func DeleteUserSessions(db *sql.DB, userID int64) {
+	_, _ = db.Exec("DELETE FROM sessions WHERE user_id = ?", userID)
+}
+
+// PurgeExpiredSessions убирает протухшие сессии: без этого таблица только растёт.
+func PurgeExpiredSessions(db *sql.DB) {
+	_, _ = db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 }
 
 // HasUsers — есть ли хоть один пользователь (для мастера первого запуска).

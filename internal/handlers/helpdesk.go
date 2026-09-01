@@ -132,6 +132,12 @@ func (a *App) HelpTrack(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Load()
 	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
 	data := helpTrackData{OrgName: cfg.OrganizationName, New: r.URL.Query().Get("new") == "1", Code: code}
+	// код заявки — единственная защита чужого обращения от просмотра,
+	// поэтому перебор кодов ограничиваем по частоте
+	if code != "" && !trackLimiter.allow(clientIP(r)) {
+		http.Error(w, "слишком много запросов, попробуйте позже", http.StatusTooManyRequests)
+		return
+	}
 	if code == "" {
 		web.Render(w, "help_track.html", data)
 		return

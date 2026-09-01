@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"time"
 
+	"netadmin/internal/auth"
 	"netadmin/internal/config"
 	"netadmin/internal/db"
 	"netadmin/internal/handlers"
@@ -36,10 +37,12 @@ func main() {
 	// фоновая задача: авто-offline устройств с агентом по таймауту heartbeat
 	go func() {
 		markStaleOffline(database)
+		auth.PurgeExpiredSessions(database)
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
 		for range t.C {
 			markStaleOffline(database)
+			auth.PurgeExpiredSessions(database)
 		}
 	}()
 

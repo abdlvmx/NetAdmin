@@ -15,7 +15,15 @@ const (
 type loginAttempt struct {
 	fails int
 	until time.Time
+	seen  time.Time // когда ключ трогали последний раз — для вытеснения
 }
+
+// Ключи лимитеров приходят извне: IP клиента и введённый логин. Без вытеснения
+// карты растут неограниченно и сами становятся способом исчерпать память.
+const (
+	maxLimiterKeys = 10000
+	limiterTTL     = 30 * time.Minute // заведомо больше срока блокировки
+)
 
 // rateLimiter — простой лимитер попыток входа по ключу (IP).
 type rateLimiter struct {
@@ -52,6 +60,15 @@ func (l *windowLimiter) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+	if len(l.m) >= maxLimiterKeys {
+		l.m = make(map[string]*winEntry, maxLimiterKeys/2)
+	} else {
+		for k, e := range l.m {
+			if now.After(e.reset) {
+				delete(l.m, k)
+			}
+		}
+	}
 	e := l.m[key]
 	if e == nil || now.After(e.reset) {
 		l.m[key] = &winEntry{count: 1, reset: now.Add(l.window)}
@@ -69,6 +86,10 @@ var agentLimiter = newWindowLimiter(120, time.Minute)
 
 // helpdeskLimiter — анти-спам портала заявок (по IP): не больше 5 заявок за 10 минут.
 var helpdeskLimiter = newWindowLimiter(5, 10*time.Minute)
+
+// trackLimiter — анти-перебор кодов заявок на странице отслеживания (по IP).
+// Код заявки — единственное, что защищает чужое обращение от просмотра.
+var trackLimiter = newWindowLimiter(30, 10*time.Minute)
 
 // blockedFor возвращает остаток блокировки для ключа (0 — не заблокирован).
 func (l *rateLimiter) blockedFor(key string) time.Duration {
@@ -88,15 +109,35 @@ func (l *rateLimiter) blockedFor(key string) time.Duration {
 func (l *rateLimiter) fail(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := time.Now()
+	l.evict(now)
 	a := l.m[key]
 	if a == nil {
 		a = &loginAttempt{}
 		l.m[key] = a
 	}
+	a.seen = now
 	a.fails++
 	if a.fails >= maxLoginFails {
-		a.until = time.Now().Add(loginLockDur)
+		a.until = now.Add(loginLockDur)
 		a.fails = 0
+	}
+}
+
+// evict убирает давно не встречавшиеся ключи. Вызывается под уже взятым мьютексом.
+//
+// Полный сброс при переполнении снял бы и действующие блокировки, но добраться
+// до потолка непросто: неудачные попытки с одного адреса упираются в блокировку
+// по IP, а доступ к серверу и так ограничен разрешёнными подсетями.
+func (l *rateLimiter) evict(now time.Time) {
+	if len(l.m) >= maxLimiterKeys {
+		l.m = make(map[string]*loginAttempt, maxLimiterKeys/2)
+		return
+	}
+	for k, a := range l.m {
+		if now.Sub(a.seen) > limiterTTL && a.until.Before(now) {
+			delete(l.m, k)
+		}
 	}
 }
 
