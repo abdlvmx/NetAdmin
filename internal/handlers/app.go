@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 
 	"netadmin/internal/ingest"
@@ -178,7 +179,29 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /discovery", a.DiscoveryPage)
 	mux.HandleFunc("POST /discovery/{id}/action", a.DiscoveryAction)
 
-	return a.withSecurity(mux)
+	return withRecover(a.withSecurity(mux))
+}
+
+// agentDeviceIDs возвращает id всех устройств с установленным агентом —
+// цели для команд и раздачи ПО «на все ПК».
+func (a *App) agentDeviceIDs() []int64 {
+	rows, err := a.DB.Query(`SELECT id FROM devices WHERE COALESCE(agent_token,'')<>''`)
+	if err != nil {
+		log.Printf("выбор устройств с агентом: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("выбор устройств с агентом: %v", err)
+	}
+	return ids
 }
 
 // setSessionCookie ставит httponly cookie сессии на 8 часов.

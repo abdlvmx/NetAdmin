@@ -2,6 +2,7 @@
 package netscan
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"net"
@@ -17,15 +18,27 @@ import (
 
 var ttlRe = regexp.MustCompile(`(?i)ttl=(\d+)`)
 
+// execTimeout — потолок времени на внешнюю утилиту (ping/arp). Собственные
+// флаги ожидания у ping не спасают: зависший процесс держал бы горутину
+// бесконечно, а сканирование запускает их сотнями.
+const execTimeout = 10 * time.Second
+
+// runCmd запускает утилиту с ограничением по времени и возвращает stdout.
+// По истечении таймаута процесс снимается.
+func runCmd(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
 // pingTTL пингует хост и парсит TTL из ответа (для определения ОС).
 func pingTTL(ip string) (alive bool, ttl int) {
-	var cmd *exec.Cmd
+	var out []byte
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("ping", "-n", "1", "-w", "300", ip)
+		out, _ = runCmd("ping", "-n", "1", "-w", "300", ip)
 	} else {
-		cmd = exec.Command("ping", "-c", "1", "-W", "1", ip)
+		out, _ = runCmd("ping", "-c", "1", "-W", "1", ip)
 	}
-	out, _ := cmd.Output()
 	if m := ttlRe.FindStringSubmatch(string(out)); m != nil {
 		ttl, _ = strconv.Atoi(m[1])
 	}
@@ -108,13 +121,17 @@ func VendorByMAC(mac string) string {
 // ответе (настоящий echo-reply); это отсекает Windows-ответы вида
 // «Destination host unreachable», которые возвращают код 0.
 func PingHost(ip string) bool {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("ping", "-n", "1", "-w", "600", ip)
-	} else {
-		cmd = exec.Command("ping", "-c", "1", "-W", "1", ip)
+	// адрес приходит из карточки устройства и из формы: без проверки строка
+	// вроде «-t» ушла бы в ping как флаг и подвесила бы запуск
+	if net.ParseIP(strings.TrimSpace(ip)) == nil {
+		return false
 	}
-	out, _ := cmd.Output()
+	var out []byte
+	if runtime.GOOS == "windows" {
+		out, _ = runCmd("ping", "-n", "1", "-w", "600", ip)
+	} else {
+		out, _ = runCmd("ping", "-c", "1", "-W", "1", ip)
+	}
 	return ttlRe.Match(out)
 }
 
@@ -249,13 +266,13 @@ func ResolveHost(ip string) string { return resolveHost(ip) }
 // arpTable читает системную ARP-таблицу: ip -> mac.
 func arpTable() map[string]string {
 	out := map[string]string{}
-	var cmd *exec.Cmd
+	var data []byte
+	var err error
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("arp", "-a")
+		data, err = runCmd("arp", "-a")
 	} else {
-		cmd = exec.Command("arp", "-n")
+		data, err = runCmd("arp", "-n")
 	}
-	data, err := cmd.Output()
 	if err != nil {
 		return out
 	}

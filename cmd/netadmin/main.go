@@ -108,7 +108,20 @@ func main() {
 	}
 	logReachableAddrs(port)
 
-	log.Fatal(http.ListenAndServe(listenAddr, app.Routes()))
+	srv := &http.Server{
+		Addr:    listenAddr,
+		Handler: app.Routes(),
+		// ReadHeaderTimeout — основная защита от медленных соединений: без него
+		// клиент, тянущий заголовки по байту, занимает воркер бесконечно.
+		ReadHeaderTimeout: 15 * time.Second,
+		// Чтение и запись тела заданы щедро осознанно: через те же соединения
+		// идут дистрибутивы ПО (до 1 ГБ), и короткий таймаут рвал бы установку.
+		ReadTimeout:    30 * time.Minute,
+		WriteTimeout:   30 * time.Minute,
+		IdleTimeout:    2 * time.Minute,
+		MaxHeaderBytes: 1 << 20,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 // logReachableAddrs печатает адреса, по которым сервер доступен агентам,

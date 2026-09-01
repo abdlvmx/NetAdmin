@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,12 +34,14 @@ func (a *App) UsersPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
-	rows, _ := a.DB.Query(`
+	var all []userRow
+	rows, err := a.DB.Query(`
 		SELECT id, username, COALESCE(full_name,''), COALESCE(email,''), role, is_active,
 		       COALESCE(created_at,'')
 		FROM users ORDER BY created_at DESC`)
-	var all []userRow
-	if rows != nil {
+	if err != nil {
+		log.Printf("список пользователей: %v", err)
+	} else {
 		defer rows.Close()
 		for rows.Next() {
 			var u userRow
@@ -46,6 +49,10 @@ func (a *App) UsersPage(w http.ResponseWriter, r *http.Request) {
 				u.CreatedAt = tz.DateTime(u.CreatedAt)
 				all = append(all, u)
 			}
+		}
+		// без этой проверки оборванная выборка молча показалась бы неполной
+		if err := rows.Err(); err != nil {
+			log.Printf("список пользователей: %v", err)
 		}
 	}
 	web.RenderPage(w, "users", usersData{User: user, Active: "users", AllUsers: all})

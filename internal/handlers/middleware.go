@@ -4,11 +4,34 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 )
 
 const csrfCookie = "csrf"
+
+// withRecover перехватывает панику в обработчике. Без него net/http гасит
+// панику молча, обрывая соединение: пользователь видит пустую страницу,
+// а в журнале не остаётся ни строчки — искать такой сбой потом нечем.
+func withRecover(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			// служебный сигнал net/http для намеренного обрыва — пропускаем дальше
+			if v == http.ErrAbortHandler {
+				panic(v)
+			}
+			log.Printf("паника при обработке %s %s: %v\n%s", r.Method, r.URL.Path, v, debug.Stack())
+			http.Error(w, "внутренняя ошибка сервера", http.StatusInternalServerError)
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
 
 func randToken() string {
 	b := make([]byte, 32)

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -151,15 +152,23 @@ func (a *App) UploadPackage(w http.ResponseWriter, r *http.Request) {
 	kind := kindByExt(header.Filename)
 
 	stored := randToken() + filepath.Ext(header.Filename)
-	dst, err := os.Create(filepath.Join(packagesDir(), stored))
+	path := filepath.Join(packagesDir(), stored)
+	dst, err := os.Create(path)
 	if err != nil {
 		http.Redirect(w, r, "/packages?error=Ошибка+сохранения", http.StatusSeeOther)
 		return
 	}
-	defer dst.Close()
 	h := sha256.New()
 	size, err := io.Copy(io.MultiWriter(dst, h), file)
+	// файл закрываем до проверки ошибки: иначе на Windows недописанный файл
+	// не удалить, и в каталоге копился бы мусор после каждой сбойной загрузки
+	closeErr := dst.Close()
+	if err == nil {
+		err = closeErr
+	}
 	if err != nil {
+		_ = os.Remove(path)
+		log.Printf("загрузка дистрибутива %q: %v", header.Filename, err)
 		http.Redirect(w, r, "/packages?error=Ошибка+записи", http.StatusSeeOther)
 		return
 	}
@@ -205,14 +214,7 @@ func (a *App) DeployPackage(w http.ResponseWriter, r *http.Request) {
 	}
 	var targets []int64
 	if r.FormValue("all") != "" {
-		rows, _ := a.DB.Query(`SELECT id FROM devices WHERE COALESCE(agent_token,'')<>''`)
-		for rows.Next() {
-			var id int64
-			if rows.Scan(&id) == nil {
-				targets = append(targets, id)
-			}
-		}
-		rows.Close()
+		targets = a.agentDeviceIDs()
 	} else {
 		for _, s := range r.Form["device"] {
 			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
