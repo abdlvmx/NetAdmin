@@ -166,9 +166,13 @@ func logReachableAddrs(port string) {
 			continue // в подсказке для агентов показываем только IPv4
 		}
 		ip := n.IP.String()
-		if n.IP.IsPrivate() || n.IP.IsLinkLocalUnicast() {
+		switch {
+		case n.IP.IsLinkLocalUnicast():
+			// 169.254.x — адрес самоназначения при неработающем DHCP,
+			// подсказывать его для агентов бессмысленно
+		case n.IP.IsPrivate():
 			lan = append(lan, ip)
-		} else {
+		default:
 			public = append(public, ip)
 		}
 	}

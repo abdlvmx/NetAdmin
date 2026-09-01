@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"netadmin/internal/auth"
 	"netadmin/internal/notify"
@@ -36,14 +37,16 @@ type diskVerdict struct {
 // assessDisk оценивает здоровье диска по SMART-показателям. Чистая функция — тестируемая.
 // Это мониторинг состояния оборудования, а не средство защиты информации.
 func assessDisk(d diskInfo) diskVerdict {
+	// состояние приходит строкой от PowerShell — регистр не фиксирован
+	health := strings.ToLower(strings.TrimSpace(d.Health))
 	switch {
 	case d.PredictFail:
 		return diskVerdict{"critical", "SMART предсказывает отказ диска"}
-	case d.Health == "Unhealthy":
+	case health == "unhealthy":
 		return diskVerdict{"critical", "Состояние диска: критическое"}
 	case d.WearPct >= 90:
 		return diskVerdict{"critical", fmt.Sprintf("Ресурс SSD почти исчерпан (износ %d%%)", d.WearPct)}
-	case d.Health == "Warning":
+	case health == "warning":
 		return diskVerdict{"warning", "Состояние диска: предупреждение"}
 	case d.WearPct >= 80:
 		return diskVerdict{"warning", fmt.Sprintf("Высокий износ SSD (%d%%)", d.WearPct)}

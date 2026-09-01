@@ -78,3 +78,21 @@ func TestAgentDisksSnapshotAndAlert(t *testing.T) {
 		t.Fatalf("после snapshot3 ожидалось 3 диска (полная замена), получено %d", n)
 	}
 }
+
+// Состояние диска приходит строкой от PowerShell — регистр не должен влиять
+// на оценку.
+func TestAssessDiskHealthCaseInsensitive(t *testing.T) {
+	for _, h := range []string{"Unhealthy", "unhealthy", " UNHEALTHY "} {
+		if got := assessDisk(diskInfo{Health: h}); got.Severity != "critical" {
+			t.Errorf("%q должно быть critical, получено %q", h, got.Severity)
+		}
+	}
+	for _, h := range []string{"Warning", "warning"} {
+		if got := assessDisk(diskInfo{Health: h}); got.Severity != "warning" {
+			t.Errorf("%q должно быть warning, получено %q", h, got.Severity)
+		}
+	}
+	if got := assessDisk(diskInfo{Health: "Healthy", WearPct: 10, Temperature: 35}); got.Severity != "" {
+		t.Errorf("исправный диск не должен давать замечаний, получено %q", got.Severity)
+	}
+}

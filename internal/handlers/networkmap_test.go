@@ -57,3 +57,25 @@ func TestSubnetOf(t *testing.T) {
 		t.Fatal("пустой IP → пустая подсеть")
 	}
 }
+
+// Тип, заданный администратором вручную, не должен переопределяться догадкой
+// по вендору: устройство HP, помеченное как «Видеорегистратор», превращалось
+// в принтер только потому, что HP делает принтеры.
+func TestInferDeviceTypeKeepsExplicitType(t *testing.T) {
+	if got := inferDeviceType("Видеорегистратор", "", "Hewlett-Packard", "NVR-01", ""); got != "other" {
+		t.Errorf("явный неизвестный тип должен давать other, получено %q", got)
+	}
+	if got := inferDeviceType("Сервер", "", "Hewlett-Packard", "SRV-1", ""); got != "server" {
+		t.Errorf("явный тип «Сервер» должен давать server, получено %q", got)
+	}
+	if got := inferDeviceType("Принтер", "", "Cisco", "PRN-1", ""); got != "printer" {
+		t.Errorf("явный тип должен побеждать вендора, получено %q", got)
+	}
+	// без явного типа эвристика по-прежнему работает
+	if got := inferDeviceType("", "", "Hewlett-Packard", "PRN-2", ""); got != "printer" {
+		t.Errorf("без явного типа вендор HP → принтер, получено %q", got)
+	}
+	if got := inferDeviceType("", "Windows 10", "", "WS-1", ""); got != "pc" {
+		t.Errorf("без явного типа Windows → pc, получено %q", got)
+	}
+}

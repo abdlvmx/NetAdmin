@@ -20,6 +20,10 @@ type slaPageData struct {
 	Period      string
 	PeriodLabel string
 	AvgUptime   float64
+	// HasData — была ли хоть одна проверка за период. Без этого признака
+	// шаблон печатал «0.00%» при полном отсутствии истории, и пустая
+	// страница читалась как «всё лежит».
+	HasData bool
 }
 
 // SLAPage — GET /sla?period=week|month : доступность сервисов за период.
@@ -63,6 +67,7 @@ func (a *App) SLAPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if cnt > 0 {
 		data.AvgUptime = sum / float64(cnt)
+		data.HasData = true
 	}
 	web.RenderPage(w, "sla", data)
 }

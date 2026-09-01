@@ -113,6 +113,12 @@ func inferDeviceType(dtype, os, vendor, hostname, ports string) string {
 	case anyContains(d, "ноут", "пк", "pc", "laptop", "desktop", "рабоч"):
 		return "pc"
 	}
+	// Тип, заданный администратором вручную, не переопределяется догадкой.
+	// Иначе устройство HP, помеченное как «Видеорегистратор», становилось
+	// принтером просто потому, что HP делает принтеры.
+	if strings.TrimSpace(dtype) != "" {
+		return "other"
+	}
 	v := strings.ToLower(vendor)
 	h := strings.ToLower(hostname)
 	o := strings.ToLower(os)

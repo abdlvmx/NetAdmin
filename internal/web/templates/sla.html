@@ -17,7 +17,7 @@
 
 <div class="content">
   <div class="summary-grid">
-    <div class="summary-card"><div class="lbl">Средняя доступность</div><div class="num">{{printf "%.2f" .AvgUptime}}%</div></div>
+    <div class="summary-card"><div class="lbl">Средняя доступность</div><div class="num">{{if .HasData}}{{printf "%.2f" .AvgUptime}}%{{else}}—{{end}}</div></div>
     <div class="summary-card"><div class="lbl">Период</div><div class="num" style="font-size:20px">{{.PeriodLabel}}</div></div>
   </div>
 

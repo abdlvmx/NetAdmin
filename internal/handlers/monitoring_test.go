@@ -3,7 +3,11 @@ package handlers
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"netadmin/internal/auth"
+	"netadmin/internal/web"
 )
 
 // Epic 6: проверка сервиса выполняется и пишет статус+историю.
@@ -83,5 +87,33 @@ func TestTopologyImpact(t *testing.T) {
 	rows.Close()
 	if len(deps) != 2 {
 		t.Fatalf("ожидалось 2 зависимых от оффлайн SQL, получено %d (%v)", len(deps), deps)
+	}
+}
+
+// При отсутствии истории средняя доступность не должна показываться как
+// «0.00%» — пустая страница читалась бы как «все сервисы лежат».
+func TestSLAPageShowsDashWithoutData(t *testing.T) {
+	rec := httptest.NewRecorder()
+	web.RenderPage(rec, "sla", slaPageData{
+		User: &auth.User{ID: 1, Username: "admin", Role: "admin"}, Active: "sla",
+		PeriodLabel: "30 дней",
+		Rows:        []slaRow{{Name: "Сервер 1С", Type: "tcp", Target: "10.0.0.1:1541", Rating: "nodata"}},
+		HasData:     false,
+	})
+	body := rec.Body.String()
+	if strings.Contains(body, "template error") {
+		t.Fatalf("ошибка шаблона: %s", body)
+	}
+	if strings.Contains(body, "0.00%") {
+		t.Error("без данных не должно быть 0.00%")
+	}
+
+	rec2 := httptest.NewRecorder()
+	web.RenderPage(rec2, "sla", slaPageData{
+		User: &auth.User{ID: 1, Username: "admin", Role: "admin"}, Active: "sla",
+		PeriodLabel: "30 дней", AvgUptime: 99.95, HasData: true,
+	})
+	if !strings.Contains(rec2.Body.String(), "99.95%") {
+		t.Error("при наличии данных должна показываться средняя доступность")
 	}
 }
