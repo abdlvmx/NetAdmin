@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -21,8 +20,7 @@ import (
 
 // downloadClient — отдельный клиент с большим таймаутом для скачивания дистрибутивов.
 var downloadClient = &http.Client{
-	Timeout:   30 * time.Minute,
-	Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	Timeout: 30 * time.Minute,
 }
 
 // installPackage скачивает дистрибутив с сервера, проверяет SHA-256 и тихо ставит.

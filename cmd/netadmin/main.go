@@ -16,7 +16,6 @@ import (
 	"netadmin/internal/db"
 	"netadmin/internal/handlers"
 	"netadmin/internal/ingest"
-	"netadmin/internal/tlscert"
 )
 
 func main() {
@@ -89,26 +88,12 @@ func main() {
 		port = "8765"
 	}
 
-	useTLS := os.Getenv("NETADMIN_TLS") != ""
-	scheme := "http"
-	if useTLS {
-		scheme = "https"
-	}
-
 	if os.Getenv("NETADMIN_NO_BROWSER") == "" {
-		go openBrowser(scheme + "://127.0.0.1:" + port)
+		go openBrowser("http://127.0.0.1:" + port)
 	}
 
-	log.Printf("NetAdmin (Go) слушает %s (UI: %s://127.0.0.1:%s)", listenAddr, scheme, port)
-	if useTLS {
-		cert, key, err := tlscert.Ensure(config.DataDir())
-		if err != nil {
-			log.Fatalf("tls cert: %v", err)
-		}
-		log.Fatal(http.ListenAndServeTLS(listenAddr, cert, key, app.Routes()))
-	} else {
-		log.Fatal(http.ListenAndServe(listenAddr, app.Routes()))
-	}
+	log.Printf("NetAdmin слушает %s (UI: http://127.0.0.1:%s)", listenAddr, port)
+	log.Fatal(http.ListenAndServe(listenAddr, app.Routes()))
 }
 
 func getenv(key, def string) string {

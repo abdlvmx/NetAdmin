@@ -176,8 +176,8 @@ func (a *App) Routes() http.Handler {
 	return a.withSecurity(mux)
 }
 
-// setSessionCookie ставит httponly cookie сессии на 8 часов (Secure при HTTPS).
-func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+// setSessionCookie ставит httponly cookie сессии на 8 часов.
+func setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    token,
@@ -185,7 +185,6 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 		HttpOnly: true,
 		MaxAge:   28800,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
 	})
 }
 

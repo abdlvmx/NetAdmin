@@ -78,7 +78,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.LogAction(a.DB, id, "login", "session", ip)
-	setSessionCookie(w, r, token)
+	setSessionCookie(w, token)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -136,7 +136,7 @@ func (a *App) Setup(w http.ResponseWriter, r *http.Request) {
 	id, _ := res.LastInsertId()
 	token, _ := auth.CreateSession(a.DB, id)
 	auth.LogAction(a.DB, id, "initial_setup", orgName, "")
-	setSessionCookie(w, r, token)
+	setSessionCookie(w, token)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 

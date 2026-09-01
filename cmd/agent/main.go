@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -31,10 +30,10 @@ var (
 	token     = envOr("NETADMIN_AGENT_TOKEN", "YOUR_TOKEN_HERE")
 )
 
-// HTTP-клиент: не проверяет самоподписанный сертификат сервера (внутренняя сеть).
+// HTTP-клиент для связи с сервером. Только локальная сеть, обычный HTTP:
+// подлинность и целостность обмена обеспечивает HMAC-подпись, не транспорт.
 var httpClient = &http.Client{
-	Timeout:   10 * time.Second,
-	Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	Timeout: 10 * time.Second,
 }
 
 func envOr(k, def string) string {

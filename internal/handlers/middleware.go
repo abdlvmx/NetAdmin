@@ -28,14 +28,14 @@ func securityHeaders(w http.ResponseWriter) {
 }
 
 // ensureCSRF возвращает CSRF-токен из cookie, создавая его при отсутствии.
-func ensureCSRF(w http.ResponseWriter, r *http.Request, secure bool) string {
+func ensureCSRF(w http.ResponseWriter, r *http.Request) string {
 	if c, err := r.Cookie(csrfCookie); err == nil && c.Value != "" {
 		return c.Value
 	}
 	tok := randToken()
 	http.SetCookie(w, &http.Cookie{
 		Name: csrfCookie, Value: tok, Path: "/",
-		SameSite: http.SameSiteLaxMode, Secure: secure,
+		SameSite: http.SameSiteLaxMode,
 	})
 	return tok
 }
@@ -45,9 +45,6 @@ func ensureCSRF(w http.ResponseWriter, r *http.Request, secure bool) string {
 func csrfExempt(path string) bool {
 	return strings.HasPrefix(path, "/api/agent-") || path == "/login" || path == "/setup"
 }
-
-// Secure определяется по факту TLS-соединения.
-func (a *App) secure(r *http.Request) bool { return r.TLS != nil }
 
 // withSecurity оборачивает роутер: security-заголовки + CSRF (double-submit).
 func (a *App) withSecurity(next http.Handler) http.Handler {
@@ -67,7 +64,7 @@ func (a *App) withSecurity(next http.Handler) http.Handler {
 			return
 		}
 
-		cookieTok := ensureCSRF(w, r, a.secure(r))
+		cookieTok := ensureCSRF(w, r)
 
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
