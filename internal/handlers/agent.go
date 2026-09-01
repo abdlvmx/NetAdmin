@@ -138,6 +138,23 @@ func (a *App) checkSig(w http.ResponseWriter, r *http.Request, key string, signe
 	return true
 }
 
+// touchDevice отмечает, что агент только что выходил на связь.
+//
+// Признак «на связи» намеренно опирается на ЛЮБОЙ запрос агента, а не только
+// на heartbeat: heartbeat адаптивный и при стабильной нагрузке приходит редко,
+// тогда как за задачами агент обращается каждые 15 секунд. Раньше учитывался
+// только heartbeat, и спокойные машины регулярно уезжали в offline.
+//
+// Условие в WHERE делает запись самоограничивающейся: при опросе раз в 15
+// секунд база обновляется не чаще раза в полминуты на устройство.
+func (a *App) touchDevice(deviceID int64) {
+	if deviceID <= 0 {
+		return
+	}
+	a.DB.Exec(`UPDATE devices SET last_seen=datetime('now'), status='online'
+		WHERE id=? AND (last_seen IS NULL OR last_seen < datetime('now','-30 seconds'))`, deviceID)
+}
+
 // authAgentPost проверяет POST-запрос агента: подпись над телом, свежесть, nonce.
 func (a *App) authAgentPost(w http.ResponseWriter, r *http.Request) (agentReq, bool) {
 	deviceID, enroll, key, ok := a.agentKey(r)
@@ -155,6 +172,7 @@ func (a *App) authAgentPost(w http.ResponseWriter, r *http.Request) (agentReq, b
 	if !a.checkSig(w, r, key, body, env) {
 		return agentReq{}, false
 	}
+	a.touchDevice(deviceID)
 	return agentReq{DeviceID: deviceID, Enroll: enroll, Key: key, Body: body}, true
 }
 
@@ -171,6 +189,7 @@ func (a *App) authAgentGet(w http.ResponseWriter, r *http.Request) (agentReq, bo
 	if !a.checkSig(w, r, key, []byte(r.Method+"\n"+r.URL.RequestURI()), env) {
 		return agentReq{}, false
 	}
+	a.touchDevice(deviceID)
 	return agentReq{DeviceID: deviceID, Enroll: enroll, Key: key}, true
 }
 

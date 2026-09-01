@@ -243,8 +243,13 @@ func post(path string, payload map[string]any) (int, []byte, error) {
 }
 
 const (
-	pollInterval = 15 * time.Second  // как часто опрашиваем метрики/события
-	maxHeartbeat = 300 * time.Second // максимум без heartbeat при стабильной нагрузке
+	// pollInterval — шаг основного цикла: сбор метрик и опрос очереди задач.
+	// Заодно это и частота, с которой сервер видит агента на связи, — признак
+	// «онлайн» опирается на любой запрос, а не только на heartbeat.
+	pollInterval = 15 * time.Second
+	// maxHeartbeat — максимум без heartbeat при стабильной нагрузке. Управляет
+	// только частотой записи метрик: на определение online/offline не влияет.
+	maxHeartbeat = 300 * time.Second
 )
 
 // bigChange — заметное изменение нагрузки (>=15 п.п. по любому из CPU/RAM/Disk или >=80%).

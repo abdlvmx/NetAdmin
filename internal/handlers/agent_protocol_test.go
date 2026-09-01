@@ -234,3 +234,42 @@ func TestAgentCannotSpoofAnotherHost(t *testing.T) {
 		t.Fatalf("инвентарь должен записаться подписавшему устройству, у PC-A %d записей", nA)
 	}
 }
+
+// Признак «на связи» должен обновляться на любом запросе агента, а не только
+// на heartbeat: heartbeat адаптивный и при стабильной нагрузке приходит раз
+// в 5 минут, из-за чего спокойные машины уезжали в offline.
+func TestAnyAgentRequestMarksDeviceSeen(t *testing.T) {
+	app := newTestApp(t)
+	const tok = "SEENTOK"
+	res, _ := app.DB.Exec(`INSERT INTO devices (hostname, status, agent_token, last_seen)
+		VALUES ('WS-IDLE','offline',?,datetime('now','-10 minutes'))`, tok)
+	id, _ := res.LastInsertId()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/agent-tasks/poll", app.AgentTasksPoll)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// опрос очереди задач — запрос без единой метрики
+	body, _ := json.Marshal(map[string]any{
+		"hostname": "WS-IDLE", "timestamp": time.Now().UTC().Unix(), "nonce": testNonce(t),
+	})
+	code, _, _ := rawPost(t, srv, "/api/agent-tasks/poll", map[string]string{
+		hdrDevice: strconv.FormatInt(id, 10),
+		hdrSig:    mac(tok, body),
+	}, body)
+	if code != 200 {
+		t.Fatalf("ожидался 200, получено %d", code)
+	}
+
+	var status string
+	var fresh int
+	app.DB.QueryRow(`SELECT status, last_seen > datetime('now','-1 minute') FROM devices WHERE id=?`, id).
+		Scan(&status, &fresh)
+	if status != "online" {
+		t.Errorf("устройство должно вернуться в online, получено %q", status)
+	}
+	if fresh != 1 {
+		t.Error("last_seen должен обновиться на любом запросе агента")
+	}
+}
