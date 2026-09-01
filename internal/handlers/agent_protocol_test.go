@@ -9,6 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -271,5 +274,60 @@ func TestAnyAgentRequestMarksDeviceSeen(t *testing.T) {
 	}
 	if fresh != 1 {
 		t.Error("last_seen должен обновиться на любом запросе агента")
+	}
+}
+
+// Агент вправе скачать только назначенный ему дистрибутив: иначе перебором
+// идентификаторов выкачивался бы весь каталог ПО.
+func TestAgentDownloadsOnlyAssignedPackage(t *testing.T) {
+	app := newTestApp(t)
+	const tok = "PKGTOK"
+	res, _ := app.DB.Exec("INSERT INTO devices (hostname, status, agent_token) VALUES ('WS-P','online',?)", tok)
+	id, _ := res.LastInsertId()
+
+	dir := t.TempDir()
+	t.Setenv("NETADMIN_DATA_DIR", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "packages"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, fn := range []string{"mine.bin", "other.bin"} {
+		if err := os.WriteFile(filepath.Join(dir, "packages", fn), []byte("data"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	app.DB.Exec(`INSERT INTO packages (id, name, kind, filename, sha256) VALUES (1,'Своё','exe','mine.bin','aa')`)
+	app.DB.Exec(`INSERT INTO packages (id, name, kind, filename, sha256) VALUES (2,'Чужое','exe','other.bin','bb')`)
+	// назначен только первый
+	app.DB.Exec(`INSERT INTO agent_tasks (device_id, kind, payload, label, status, package_id)
+		VALUES (?, 'install', '{}', 'Установка', 'sent', 1)`, id)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agent-package", app.AgentPackageDownload)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	get := func(pkgID string) int {
+		q := url.Values{}
+		q.Set("id", pkgID)
+		q.Set("ts", strconv.FormatInt(time.Now().UTC().Unix(), 10))
+		q.Set("nonce", testNonce(t))
+		uri := "/api/agent-package?" + q.Encode()
+
+		req, _ := http.NewRequest("GET", srv.URL+uri, nil)
+		req.Header.Set(hdrDevice, strconv.FormatInt(id, 10))
+		req.Header.Set(hdrSig, mac(tok, []byte("GET\n"+uri)))
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := get("1"); code != 200 {
+		t.Errorf("назначенный дистрибутив должен отдаваться, получено %d", code)
+	}
+	if code := get("2"); code != http.StatusForbidden {
+		t.Errorf("чужой дистрибутив должен отвергаться, получено %d", code)
 	}
 }

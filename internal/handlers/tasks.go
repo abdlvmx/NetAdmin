@@ -11,8 +11,17 @@ import (
 
 // enqueueTask ставит задачу устройству в очередь (pull-модель: агент заберёт сам).
 func (a *App) enqueueTask(deviceID int64, kind, payload, label string, userID int64) (int64, error) {
-	res, err := a.DB.Exec(`INSERT INTO agent_tasks (device_id, kind, payload, label, status, created_by)
-		VALUES (?,?,?,?, 'pending', ?)`, deviceID, kind, payload, label, userID)
+	return a.enqueuePackageTask(deviceID, kind, payload, label, userID, 0)
+}
+
+// enqueuePackageTask ставит задачу, связанную с дистрибутивом.
+//
+// Идентификатор пакета хранится отдельной колонкой, а не только внутри payload:
+// по нему проверяется право агента скачать файл. Разбирать ради этого JSON
+// в SQL было бы хрупко.
+func (a *App) enqueuePackageTask(deviceID int64, kind, payload, label string, userID, pkgID int64) (int64, error) {
+	res, err := a.DB.Exec(`INSERT INTO agent_tasks (device_id, kind, payload, label, status, created_by, package_id)
+		VALUES (?,?,?,?, 'pending', ?, ?)`, deviceID, kind, payload, label, userID, pkgID)
 	if err != nil {
 		return 0, err
 	}

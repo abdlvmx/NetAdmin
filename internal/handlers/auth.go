@@ -29,7 +29,7 @@ func (a *App) LoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", http.StatusFound)
 		return
 	}
-	web.Render(w, "login.html", map[string]any{"Error": ""})
+	web.Render(w, "login.html", map[string]any{"Error": "", "CSRF": csrfToken(r)})
 }
 
 // Login — POST /login.
@@ -46,12 +46,12 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 	// блокировки: по IP и по учётной записи
 	if d := loginLimiter.blockedFor(ip); d > 0 {
 		web.Render(w, "login.html", map[string]any{
-			"Error": fmt.Sprintf("Слишком много попыток входа. Повторите через %d мин.", int(d.Minutes())+1)})
+			"Error": fmt.Sprintf("Слишком много попыток входа. Повторите через %d мин.", int(d.Minutes())+1), "CSRF": csrfToken(r)})
 		return
 	}
 	if d := userLockout.blockedFor(username); d > 0 {
 		web.Render(w, "login.html", map[string]any{
-			"Error": fmt.Sprintf("Учётная запись временно заблокирована. Повторите через %d мин.", int(d.Minutes())+1)})
+			"Error": fmt.Sprintf("Учётная запись временно заблокирована. Повторите через %d мин.", int(d.Minutes())+1), "CSRF": csrfToken(r)})
 		return
 	}
 
@@ -71,7 +71,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		loginLimiter.fail(ip)
 		userLockout.fail(username)
 		auth.LogAction(a.DB, 0, "login_failed", username, ip)
-		web.Render(w, "login.html", map[string]any{"Error": "Неверный логин или пароль"})
+		web.Render(w, "login.html", map[string]any{"Error": "Неверный логин или пароль", "CSRF": csrfToken(r)})
 		return
 	}
 	loginLimiter.reset(ip)
@@ -99,6 +99,7 @@ func (a *App) SetupPage(w http.ResponseWriter, r *http.Request) {
 	web.Render(w, "setup.html", map[string]any{
 		"Error":            "",
 		"OrganizationName": config.Load().OrganizationName,
+		"CSRF":             csrfToken(r),
 	})
 }
 
@@ -121,6 +122,7 @@ func (a *App) Setup(w http.ResponseWriter, r *http.Request) {
 		web.Render(w, "setup.html", map[string]any{
 			"Error":            "Логин — от 3 символов; пароль — от 8 символов, обязательно с буквами и цифрами.",
 			"OrganizationName": orgName,
+			"CSRF":             csrfToken(r),
 		})
 		return
 	}
@@ -148,7 +150,8 @@ func (a *App) Setup(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
-// Logout — GET /logout.
+// Logout — POST /logout. Именно POST: по GET выход дёргался любой картинкой
+// с чужой страницы, и пользователя выкидывало из системы без его участия.
 func (a *App) Logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("session"); err == nil {
 		auth.DeleteSession(a.DB, c.Value)

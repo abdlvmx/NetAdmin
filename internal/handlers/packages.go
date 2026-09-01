@@ -236,7 +236,7 @@ func (a *App) DeployPackage(w http.ResponseWriter, r *http.Request) {
 	}
 	payload, _ := json.Marshal(p)
 	for _, id := range targets {
-		a.enqueueTask(id, "install", string(payload), "Установка: "+p.Name, user.ID)
+		a.enqueuePackageTask(id, "install", string(payload), "Установка: "+p.Name, user.ID, p.ID)
 	}
 	auth.LogAction(a.DB, user.ID, "package_deploy", p.Name, strconv.Itoa(len(targets))+" устройств")
 	http.Redirect(w, r, "/packages?message=Установка+поставлена+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
@@ -278,7 +278,7 @@ func (a *App) DeployAgentUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	payload, _ := json.Marshal(p)
 	for _, id := range targets {
-		a.enqueueTask(id, "selfupdate", string(payload), "Обновление агента: "+p.Name, user.ID)
+		a.enqueuePackageTask(id, "selfupdate", string(payload), "Обновление агента: "+p.Name, user.ID, p.ID)
 	}
 	auth.LogAction(a.DB, user.ID, "agent_update", p.Name, strconv.Itoa(len(targets))+" устройств")
 	http.Redirect(w, r, "/packages?message=Обновление+агента+поставлено+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
@@ -309,10 +309,22 @@ func (a *App) agentVersions() []verRow {
 
 // AgentPackageDownload — GET /api/agent-package?id=N : агент скачивает дистрибутив (по токену).
 func (a *App) AgentPackageDownload(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.authAgentGet(w, r); !ok {
+	ag, ok := a.authAgentGet(w, r)
+	if !ok {
 		return
 	}
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	// Агент вправе скачать только тот дистрибутив, который ему назначен, и
+	// только пока задача не завершена. Иначе любой агент выкачивал бы весь
+	// каталог ПО по перебору идентификаторов.
+	var allowed int
+	a.DB.QueryRow(`SELECT 1 FROM agent_tasks
+		WHERE device_id=? AND package_id=? AND status IN ('pending','sent') LIMIT 1`,
+		ag.DeviceID, id).Scan(&allowed)
+	if allowed != 1 {
+		http.Error(w, "package not assigned", http.StatusForbidden)
+		return
+	}
 	var fn, orig string
 	if a.DB.QueryRow("SELECT COALESCE(filename,''), COALESCE(original_name,'') FROM packages WHERE id=?", id).
 		Scan(&fn, &orig) != nil || fn == "" {

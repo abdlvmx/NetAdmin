@@ -61,6 +61,7 @@
   <div class="card">
     {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
     <form method="post" action="/setup">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <div class="form-group">
         <label>Название организации</label>
         <input type="text" name="organization_name" value="{{.OrganizationName}}" placeholder="ООО Ромашка">

@@ -34,7 +34,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /login", a.Login)
 	mux.HandleFunc("GET /setup", a.SetupPage)
 	mux.HandleFunc("POST /setup", a.Setup)
-	mux.HandleFunc("GET /logout", a.Logout)
+	mux.HandleFunc("POST /logout", a.Logout)
 
 	mux.HandleFunc("GET /dashboard", a.Dashboard)
 

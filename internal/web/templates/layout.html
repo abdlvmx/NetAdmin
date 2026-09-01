@@ -374,7 +374,9 @@
       <div class="role">{{.User.Role}}</div>
     </div>
     <button class="icon-btn" onclick="toggleTheme()" title="Светлая / тёмная тема" id="theme-toggle">🌙</button>
-    <a href="/logout" class="icon-btn logout" title="Выйти">⎋</a>
+    <form method="post" action="/logout" style="display:inline">
+      <button type="submit" class="icon-btn logout" title="Выйти" style="border:0;background:none;cursor:pointer;font:inherit">⎋</button>
+    </form>
   </div>
 </aside>
 {{end}}

@@ -30,16 +30,16 @@ func TestInferDeviceType(t *testing.T) {
 	cases := []struct {
 		dtype, os, vendor, host, ports, want string
 	}{
-		{"Сервер", "", "", "", "", "server"},                        // ручной тип
-		{"", "", "Hewlett Packard", "", "", "printer"},               // вендор-принтер
-		{"", "", "", "office-pc", "9100", "printer"},                 // порт печати
-		{"", "", "Hikvision", "cam-12", "", "camera"},                // камера
-		{"", "", "MikroTik", "", "", "network"},                      // сетевое
-		{"", "", "Xiaomi", "", "", "phone"},                          // телефон
-		{"", "Windows 10 Pro", "Dell", "ws-01", "", "pc"},            // ПК по ОС
-		{"", "Windows Server 2019", "", "", "", "server"},            // сервер по ОС
-		{"", "Android 13", "", "", "", "phone"},                      // android → телефон
-		{"", "", "Unknown Vendor", "", "", "other"},                  // прочее
+		{"Сервер", "", "", "", "", "server"},              // ручной тип
+		{"", "", "Hewlett Packard", "", "", "printer"},    // вендор-принтер
+		{"", "", "", "office-pc", "9100", "printer"},      // порт печати
+		{"", "", "Hikvision", "cam-12", "", "camera"},     // камера
+		{"", "", "MikroTik", "", "", "network"},           // сетевое
+		{"", "", "Xiaomi", "", "", "phone"},               // телефон
+		{"", "Windows 10 Pro", "Dell", "ws-01", "", "pc"}, // ПК по ОС
+		{"", "Windows Server 2019", "", "", "", "server"}, // сервер по ОС
+		{"", "Android 13", "", "", "", "phone"},           // android → телефон
+		{"", "", "Unknown Vendor", "", "", "other"},       // прочее
 	}
 	for _, c := range cases {
 		if got := inferDeviceType(c.dtype, c.os, c.vendor, c.host, c.ports); got != c.want {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -63,10 +64,22 @@ func ensureCSRF(w http.ResponseWriter, r *http.Request) string {
 	return tok
 }
 
-// csrfExempt — пути без CSRF-проверки: приём от агента (авторизация токеном,
-// без cookie) и вход/первичная настройка (сессии ещё нет).
+// csrfExempt — пути без CSRF-проверки. Остались только эндпоинты агента: он
+// авторизуется подписью, а не cookie, и CSRF к нему неприменим. Вход и
+// первичная настройка проверяются наравне с остальными формами — иначе с
+// чужого сайта можно было бы залогинить пользователя в подставную учётку.
 func csrfExempt(path string) bool {
-	return strings.HasPrefix(path, "/api/agent-") || path == "/login" || path == "/setup"
+	return strings.HasPrefix(path, "/api/agent-")
+}
+
+// csrfCtxKey — ключ, под которым CSRF-токен кладётся в контекст запроса.
+type csrfCtxKey struct{}
+
+// csrfToken достаёт токен, положенный middleware. Читать его из cookie самим
+// нельзя: на первом визите cookie ещё только уходит в ответе, а в запросе её нет.
+func csrfToken(r *http.Request) string {
+	v, _ := r.Context().Value(csrfCtxKey{}).(string)
+	return v
 }
 
 // withSecurity оборачивает роутер: ограничение по подсетям, security-заголовки
@@ -97,6 +110,9 @@ func (a *App) withSecurity(next http.Handler) http.Handler {
 		}
 
 		cookieTok := ensureCSRF(w, r)
+		// страницы входа и настройки идут без общего layout, поэтому токен
+		// передаётся им через контекст, а не подставляется скриптом
+		r = r.WithContext(context.WithValue(r.Context(), csrfCtxKey{}, cookieTok))
 
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
