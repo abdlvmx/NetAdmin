@@ -2,12 +2,13 @@
 
 {{define "extra_head"}}
 <style>
-  .device-name { font-weight: 600; }
+  .device-name { font-weight: 600; white-space: nowrap; }
   .dev-link { color: var(--accent); text-decoration: none; }
   .dev-link:hover { text-decoration: underline; }
-  .device-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  /* Адрес и MAC — одна строка. При переносе ячейка становилась трёхстрочной
+     и тянула вверх всю строку таблицы. */
+  .device-meta { color: var(--muted); font-size: var(--fs-xs); margin-top: 1px; white-space: nowrap; }
   .inv-line { color: var(--muted); font-size: 12px; line-height: 1.5; }
-  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .chart-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin: 10px 0; }
   .chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
   .chart-canvas { width: 100%; height: 260px; display: block; }
@@ -114,8 +115,9 @@
               </div>
               {{end}}
             </td>
-            <td>{{if .EmployeeName}}{{.EmployeeName}}{{else if .OwnerName}}{{.OwnerName}}{{else}}—{{end}}</td>
-            <td class="text-muted">{{if .Location}}{{.Location}}{{else}}—{{end}}</td>
+            {{$owner := ""}}{{if .EmployeeName}}{{$owner = .EmployeeName}}{{else if .OwnerName}}{{$owner = .OwnerName}}{{end}}
+            <td class="cell-tight" title="{{$owner}}">{{if $owner}}{{$owner}}{{else}}—{{end}}</td>
+            <td class="cell-tight text-muted" title="{{.Location}}">{{if .Location}}{{.Location}}{{else}}—{{end}}</td>
             <td data-sort-val="{{if .HasToken}}1{{else}}0{{end}}">
               {{if .HasToken}}<span class="badge badge-green" title="агент установлен и зарегистрирован">✓ агент</span>
               {{else}}<span class="text-muted">—</span>{{end}}
