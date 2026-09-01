@@ -6,9 +6,11 @@ package main
 import (
 	"bytes"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,9 +29,20 @@ import (
 )
 
 var (
-	serverURL = envOr("NETADMIN_SERVER_URL", "http://0.0.0.0:8765")
-	token     = envOr("NETADMIN_AGENT_TOKEN", "YOUR_TOKEN_HERE")
+	serverURL = envOr("NETADMIN_SERVER_URL", "http://127.0.0.1:8765")
+	token     = os.Getenv("NETADMIN_AGENT_TOKEN") // enrollment-токен, только для первой регистрации
 )
+
+// Заголовки протокола. Токен по сети не передаётся — он лишь ключ HMAC,
+// а сервер выбирает ключ по идентификатору устройства.
+const (
+	hdrDevice = "X-Agent-Device"
+	hdrEnroll = "X-Agent-Enroll"
+	hdrSig    = "X-Agent-Signature"
+)
+
+// maxRespBytes — потолок ответа сервера, чтобы подставной сервер не выел память.
+const maxRespBytes = 4 << 20
 
 // HTTP-клиент для связи с сервером. Только локальная сеть, обычный HTTP:
 // подлинность и целостность обмена обеспечивает HMAC-подпись, не транспорт.
@@ -52,6 +66,7 @@ func statePath() string {
 }
 
 type agentState struct {
+	DeviceID     int64  `json:"device_id"`     // идентификатор устройства на сервере
 	DeviceToken  string `json:"device_token"`  // персональный токен, выданный сервером
 	LastSoftware string `json:"last_software"` // когда последний раз слали инвентарь ПО
 	LastServices string `json:"last_services"` // когда последний раз слали список служб
@@ -60,14 +75,36 @@ type agentState struct {
 	LastDisks    string `json:"last_disks"`    // когда последний раз слали здоровье дисков (SMART)
 }
 
-// deviceToken — текущий персональный токен (если выдан); иначе используется enrollment.
-var deviceToken string
+// deviceToken/deviceID — реквизиты, выданные сервером при регистрации.
+var (
+	deviceToken string
+	deviceID    int64
+)
 
-func authToken() string {
-	if deviceToken != "" {
-		return deviceToken
+// authKey возвращает ключ HMAC и заголовок, по которому сервер этот ключ найдёт.
+// Пока устройство не зарегистрировано, работаем по enrollment-токену.
+func authKey() (key, hdrName, hdrValue string) {
+	if deviceToken != "" && deviceID > 0 {
+		return deviceToken, hdrDevice, strconv.FormatInt(deviceID, 10)
 	}
-	return token
+	return token, hdrEnroll, "1"
+}
+
+// sign — HMAC-SHA256 в hex; им подписывается запрос и проверяется ответ.
+func sign(key string, data []byte) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write(data)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// newNonce — одноразовая метка запроса: вместе с timestamp не даёт повторно
+// проиграть перехваченный запрос.
+func newNonce() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(b)
 }
 
 func loadState() agentState {
@@ -177,25 +214,30 @@ func runPS(script string) ([]byte, bool) {
 }
 
 func post(path string, payload map[string]any) (int, []byte, error) {
-	payload["timestamp"] = time.Now().UTC().Unix() // защита от replay
+	payload["timestamp"] = time.Now().UTC().Unix()
+	payload["nonce"] = newNonce()
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequest("POST", serverURL+path, bytes.NewReader(b))
 	if err != nil {
 		return 0, nil, err
 	}
-	tok := authToken()
+	key, hName, hValue := authKey()
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Agent-Token", tok)
-	// HMAC-SHA256 тела на токене агента (целостность + анти-replay)
-	mac := hmac.New(sha256.New, []byte(tok))
-	mac.Write(b)
-	req.Header.Set("X-Agent-Signature", hex.EncodeToString(mac.Sum(nil)))
+	req.Header.Set(hName, hValue)
+	req.Header.Set(hdrSig, sign(key, b))
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
+	// Ответ сервера тоже подписан. Без этой проверки любой, кто ответит за
+	// сервер, смог бы выдать агенту задачу на установку своего пакета.
+	if resp.StatusCode == http.StatusOK &&
+		!hmac.Equal([]byte(resp.Header.Get(hdrSig)), []byte(sign(key, body))) {
+		return resp.StatusCode, nil, errors.New("неверная подпись ответа сервера")
+	}
 	return resp.StatusCode, body, nil
 }
 
@@ -272,7 +314,10 @@ func dueDisks(last string) bool {
 func main() {
 	log.Printf("NetAdmin agent → %s", serverURL)
 	st := loadState()
-	deviceToken = unprotectString(st.DeviceToken)
+	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
+	if deviceToken == "" && token == "" {
+		log.Fatal("не задан NETADMIN_AGENT_TOKEN — enrollment-токен обязателен для первой регистрации")
+	}
 	var lastSent map[string]any
 	var lastHB time.Time
 
@@ -287,19 +332,24 @@ func main() {
 			case status == 401:
 				if deviceToken != "" {
 					log.Println("токен отозван — перерегистрация по enrollment-токену")
-					deviceToken, st.DeviceToken = "", ""
+					deviceToken, deviceID = "", 0
+					st.DeviceToken, st.DeviceID = "", 0
 					saveState(st)
 				} else {
 					log.Println("heartbeat: 401 (неверный enrollment-токен)")
 				}
+			case status == 409:
+				log.Println("устройство уже зарегистрировано: отзовите токен на сервере перед переустановкой агента")
 			case status == 200:
 				var resp struct {
-					Token string `json:"token"`
+					Token    string `json:"token"`
+					DeviceID int64  `json:"device_id"`
 				}
 				_ = json.Unmarshal(body, &resp)
 				if resp.Token != "" && resp.Token != deviceToken {
-					deviceToken = resp.Token
+					deviceToken, deviceID = resp.Token, resp.DeviceID
 					st.DeviceToken = protectString(resp.Token) // DPAPI на Windows
+					st.DeviceID = resp.DeviceID
 					saveState(st)
 					log.Println("получен персональный токен устройства")
 				}
@@ -367,8 +417,8 @@ func main() {
 			}
 		}
 
-		// удалённые задачи (RMM): забираем и выполняем (только после enrollment)
-		if deviceToken != "" {
+		// удалённые задачи (RMM): забираем и выполняем (только после регистрации)
+		if deviceToken != "" && deviceID > 0 {
 			pollTasks()
 		}
 

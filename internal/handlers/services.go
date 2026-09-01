@@ -13,11 +13,7 @@ import (
 // снапшоте) фиксируются как warning-событие. Быстрый критический детект новой
 // службы обеспечивает событие 7045 из журнала — это инвентарь-бэкстоп.
 func (a *App) AgentServices(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := a.resolveAgent(r); !ok {
-		http.Error(w, "invalid agent token", http.StatusUnauthorized)
-		return
-	}
-	body, ok := a.verifyAgentRequest(w, r)
+	ag, ok := a.authAgentPost(w, r)
 	if !ok {
 		return
 	}
@@ -30,14 +26,16 @@ func (a *App) AgentServices(w http.ResponseWriter, r *http.Request) {
 			Path        string `json:"path"`
 		} `json:"services"`
 	}
-	if err := json.Unmarshal(body, &p); err != nil {
+	if err := json.Unmarshal(ag.Body, &p); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
 
-	var did int64
-	if a.DB.QueryRow("SELECT id FROM devices WHERE hostname=?", p.Hostname).Scan(&did) != nil || did == 0 {
-		writeJSON(w, map[string]any{"ok": true, "skipped": "unknown host"})
+	// устройство определяется подписью запроса, а не полем в теле: иначе агент
+	// одной машины мог бы переписать инвентарь другой, назвавшись её именем
+	did := ag.DeviceID
+	if did == 0 {
+		writeAgentJSON(w, ag.Key, map[string]any{"ok": true, "skipped": "not enrolled"})
 		return
 	}
 
@@ -87,7 +85,7 @@ func (a *App) AgentServices(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, map[string]any{"ok": true, "count": len(p.Services)})
+	writeAgentJSON(w, ag.Key, map[string]any{"ok": true, "count": len(p.Services)})
 }
 
 // DeviceServices — GET /api/devices/{id}/services : список служб устройства.

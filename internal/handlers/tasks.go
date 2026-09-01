@@ -23,12 +23,8 @@ func (a *App) enqueueTask(deviceID int64, kind, payload, label string, userID in
 // AgentTasksPoll — POST /api/agent-tasks/poll : агент забирает свои ожидающие задачи.
 // Возвращает задачи и помечает их «sent» (выдача под токеном устройства).
 func (a *App) AgentTasksPoll(w http.ResponseWriter, r *http.Request) {
-	deviceID, enroll, ok := a.resolveAgent(r)
+	ag, ok := a.authAgentPost(w, r)
 	if !ok {
-		http.Error(w, "invalid agent token", http.StatusUnauthorized)
-		return
-	}
-	if _, ok := a.verifyAgentRequest(w, r); !ok {
 		return
 	}
 	type task struct {
@@ -38,9 +34,9 @@ func (a *App) AgentTasksPoll(w http.ResponseWriter, r *http.Request) {
 	}
 	tasks := []task{}
 	// до завершения enrollment у агента нет device_id — задач не выдаём
-	if !enroll && deviceID > 0 {
+	if !ag.Enroll && ag.DeviceID > 0 {
 		rows, err := a.DB.Query(`SELECT id, COALESCE(kind,''), COALESCE(payload,'')
-			FROM agent_tasks WHERE device_id=? AND status='pending' ORDER BY id LIMIT 20`, deviceID)
+			FROM agent_tasks WHERE device_id=? AND status='pending' ORDER BY id LIMIT 20`, ag.DeviceID)
 		if err == nil {
 			for rows.Next() {
 				var t task
@@ -54,17 +50,12 @@ func (a *App) AgentTasksPoll(w http.ResponseWriter, r *http.Request) {
 			a.DB.Exec("UPDATE agent_tasks SET status='sent', sent_at=datetime('now') WHERE id=?", t.ID)
 		}
 	}
-	writeJSON(w, map[string]any{"tasks": tasks})
+	writeAgentJSON(w, ag.Key, map[string]any{"tasks": tasks})
 }
 
 // AgentTasksResult — POST /api/agent-tasks/result : агент сообщает результат задачи.
 func (a *App) AgentTasksResult(w http.ResponseWriter, r *http.Request) {
-	deviceID, _, ok := a.resolveAgent(r)
-	if !ok {
-		http.Error(w, "invalid agent token", http.StatusUnauthorized)
-		return
-	}
-	body, ok := a.verifyAgentRequest(w, r)
+	ag, ok := a.authAgentPost(w, r)
 	if !ok {
 		return
 	}
@@ -74,7 +65,7 @@ func (a *App) AgentTasksResult(w http.ResponseWriter, r *http.Request) {
 		Result   string `json:"result"`
 		ExitCode int    `json:"exit_code"`
 	}
-	if err := json.Unmarshal(body, &p); err != nil {
+	if err := json.Unmarshal(ag.Body, &p); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
@@ -88,8 +79,8 @@ func (a *App) AgentTasksResult(w http.ResponseWriter, r *http.Request) {
 	}
 	// обновляем только задачу, принадлежащую этому устройству
 	a.DB.Exec(`UPDATE agent_tasks SET status=?, result=?, exit_code=?, done_at=datetime('now')
-		WHERE id=? AND device_id=?`, status, result, p.ExitCode, p.ID, deviceID)
-	writeJSON(w, map[string]any{"ok": true})
+		WHERE id=? AND device_id=?`, status, result, p.ExitCode, p.ID, ag.DeviceID)
+	writeAgentJSON(w, ag.Key, map[string]any{"ok": true})
 }
 
 // DeviceTasks — GET /api/devices/{id}/tasks : история удалённых действий устройства.

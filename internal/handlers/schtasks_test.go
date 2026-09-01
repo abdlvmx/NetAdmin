@@ -21,7 +21,7 @@ func TestAgentSchTasksSnapshotDiff(t *testing.T) {
 	}
 
 	// первый снапшот — база, истории изменений быть не должно
-	if code := postJSON(t, srv, "/api/agent-schtasks", tok, map[string]any{
+	if code := postJSON(t, app, srv, "/api/agent-schtasks", tok, map[string]any{
 		"hostname": "WS-1",
 		"tasks":    []map[string]any{task(`\Microsoft\Windows\`, "GoogleUpdate", `C:\GoogleUpdate.exe`)},
 	}); code != 200 {
@@ -32,7 +32,7 @@ func TestAgentSchTasksSnapshotDiff(t *testing.T) {
 	}
 
 	// второй снапшот: новая задача + перенацеливание существующей
-	postJSON(t, srv, "/api/agent-schtasks", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-schtasks", tok, map[string]any{
 		"hostname": "WS-1",
 		"tasks": []map[string]any{
 			task(`\Microsoft\Windows\`, "GoogleUpdate", `C:\Temp\malware.exe`), // перенацелено

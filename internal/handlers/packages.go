@@ -234,8 +234,7 @@ func (a *App) DeployPackage(w http.ResponseWriter, r *http.Request) {
 
 // AgentPackageDownload — GET /api/agent-package?id=N : агент скачивает дистрибутив (по токену).
 func (a *App) AgentPackageDownload(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := a.resolveAgent(r); !ok {
-		http.Error(w, "invalid agent token", http.StatusUnauthorized)
+	if _, ok := a.authAgentGet(w, r); !ok {
 		return
 	}
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)

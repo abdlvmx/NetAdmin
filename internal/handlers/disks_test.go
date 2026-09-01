@@ -44,7 +44,7 @@ func TestAgentDisksSnapshotAndAlert(t *testing.T) {
 	}
 
 	// первый снимок: один исправный, один с предсказанным отказом
-	postJSON(t, srv, "/api/agent-disks", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-disks", tok, map[string]any{
 		"hostname": "WS-9", "disks": []map[string]any{
 			disk("Good SSD", "S-OK", "Healthy", 10, false),
 			disk("Dying SSD", "S-BAD", "Healthy", 10, true)}})
@@ -57,7 +57,7 @@ func TestAgentDisksSnapshotAndAlert(t *testing.T) {
 	}
 
 	// второй снимок: тот же отказавший диск всё ещё критичен — нового алерта быть НЕ должно
-	postJSON(t, srv, "/api/agent-disks", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-disks", tok, map[string]any{
 		"hostname": "WS-9", "disks": []map[string]any{
 			disk("Good SSD", "S-OK", "Healthy", 10, false),
 			disk("Dying SSD", "S-BAD", "Healthy", 10, true)}})
@@ -66,7 +66,7 @@ func TestAgentDisksSnapshotAndAlert(t *testing.T) {
 	}
 
 	// третий снимок: добавился ещё один отказавший диск — ровно 1 новый алерт
-	postJSON(t, srv, "/api/agent-disks", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-disks", tok, map[string]any{
 		"hostname": "WS-9", "disks": []map[string]any{
 			disk("Good SSD", "S-OK", "Healthy", 10, false),
 			disk("Dying SSD", "S-BAD", "Healthy", 10, true),

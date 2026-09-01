@@ -21,7 +21,7 @@ func TestHeartbeatTracksHardwareChanges(t *testing.T) {
 	defer srv.Close()
 
 	// апгрейд: CPU, RAM 8→16, диск 240→480, ОС Win10→Win11
-	code := postJSON(t, srv, "/api/agent-heartbeat", tok, map[string]any{
+	code := postJSON(t, app, srv, "/api/agent-heartbeat", tok, map[string]any{
 		"hostname": "WS-1", "os": "Windows", "cpu": 10.0, "ram": 30.0, "disk": 40.0,
 		"cpu_model": "Intel i7-12700", "ram_total_gb": 16, "disk_total_gb": 480,
 		"os_version": "Microsoft Windows 11 Pro",
@@ -47,7 +47,7 @@ func TestHeartbeatTracksHardwareChanges(t *testing.T) {
 	}
 
 	// повторный heartbeat с теми же данными — новых изменений нет
-	postJSON(t, srv, "/api/agent-heartbeat", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-heartbeat", tok, map[string]any{
 		"hostname": "WS-1", "os": "Windows", "cpu": 11.0, "ram": 31.0, "disk": 41.0,
 		"cpu_model": "Intel i7-12700", "ram_total_gb": 16, "disk_total_gb": 480,
 		"os_version": "Microsoft Windows 11 Pro",
@@ -69,7 +69,7 @@ func TestHeartbeatFirstPopulationNoChange(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	postJSON(t, srv, "/api/agent-heartbeat", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-heartbeat", tok, map[string]any{
 		"hostname": "WS-2", "os": "Windows", "cpu": 5.0, "ram": 20.0, "disk": 30.0,
 		"cpu_model": "AMD Ryzen 5", "ram_total_gb": 32, "disk_total_gb": 1000,
 		"os_version": "Microsoft Windows 11 Pro",

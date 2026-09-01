@@ -21,7 +21,7 @@ func TestAgentAutorunsSnapshotDiff(t *testing.T) {
 	}
 
 	// первый снапшот — база, истории изменений быть не должно
-	if code := postJSON(t, srv, "/api/agent-autoruns", tok, map[string]any{
+	if code := postJSON(t, app, srv, "/api/agent-autoruns", tok, map[string]any{
 		"hostname": "WS-1",
 		"autoruns": []map[string]any{ar(`HKLM\Run`, "OneDrive", `C:\OneDrive.exe`)},
 	}); code != 200 {
@@ -32,7 +32,7 @@ func TestAgentAutorunsSnapshotDiff(t *testing.T) {
 	}
 
 	// второй снапшот: добавилась новая запись + у существующей сменилась команда
-	postJSON(t, srv, "/api/agent-autoruns", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-autoruns", tok, map[string]any{
 		"hostname": "WS-1",
 		"autoruns": []map[string]any{
 			ar(`HKLM\Run`, "OneDrive", `C:\Temp\hijack.exe`), // подмена команды
