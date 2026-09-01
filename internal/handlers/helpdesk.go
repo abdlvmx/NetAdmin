@@ -109,6 +109,17 @@ func (a *App) HelpSubmit(w http.ResponseWriter, r *http.Request) {
 		"От: " + name + locDetail(location) + contactDetail(contact) + "\n\n" + desc +
 		"\n\nОткрыть: /tickets/" + strconv.FormatInt(id, 10))
 
+	// Подтверждение заявителю. Код показывается только на странице после
+	// отправки: закрыв вкладку, человек терял единственный способ отследить
+	// обращение и писал заново.
+	notify.Email(email, "Заявка "+code+" принята",
+		"Здравствуйте, "+name+".\n\n"+
+			"Ваше обращение принято, номер заявки: "+code+"\n"+
+			"Тема: "+title+"\n\n"+
+			"Сохраните этот код — по нему можно посмотреть статус и написать "+
+			"в ИТ-службу на портале заявок, в разделе «Отследить заявку».\n\n"+
+			"Отвечать на это письмо не нужно.")
+
 	http.Redirect(w, r, "/help/track?code="+code+"&new=1", http.StatusSeeOther)
 }
 

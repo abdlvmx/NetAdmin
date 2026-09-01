@@ -77,6 +77,15 @@
       <option value="offline">Оффлайн</option>
       <option value="unknown">Неизвестно</option>
     </select>
+    <select data-filter-target="#dev-body" data-col="agent">
+      <option value="all">Агент: любой</option>
+      <option value="yes">Агент установлен</option>
+      <option value="no">Без агента</option>
+    </select>
+    <select data-filter-target="#dev-body" data-col="alert">
+      <option value="all">Все устройства</option>
+      <option value="1">Только с проблемами</option>
+    </select>
     <a href="/devices/export" class="btn btn-ghost">Экспорт CSV</a>
   </div>
   <div class="card">
@@ -90,7 +99,7 @@
         </thead>
         <tbody id="dev-body">
           {{range .Devices}}
-          <tr id="row-{{.ID}}" data-status="{{.Status}}" data-alert="{{if .Alert}}1{{else}}0{{end}}">
+          <tr id="row-{{.ID}}" data-status="{{.Status}}" data-alert="{{if .Alert}}1{{else}}0{{end}}" data-agent="{{if .HasToken}}yes{{else}}no{{end}}">
             <td data-sort-val="{{.IP}}">
               <div class="device-name"><a href="/devices/{{.ID}}" class="dev-link">{{.Hostname}}</a>{{if .Critical}} <span class="badge badge-amber" style="font-size:10px" title="критически важное — мониторинг доступности">★</span>{{end}}</div>
               <div class="device-meta">{{if .IP}}{{.IP}}{{else}}—{{end}}{{if .MAC}} · {{.MAC}}{{end}}</div>
