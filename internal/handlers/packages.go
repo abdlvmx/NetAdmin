@@ -65,14 +65,21 @@ type deployRow struct {
 	Created string
 }
 
+// verRow — сколько машин на какой версии агента.
+type verRow struct {
+	Version string
+	Count   int
+}
+
 type packagesData struct {
-	User     *auth.User
-	Active   string
-	Packages []pkgRow
-	Devices  []employeeOpt
-	Recent   []deployRow
-	Msg      string
-	Err      string
+	User          *auth.User
+	Active        string
+	Packages      []pkgRow
+	Devices       []employeeOpt
+	Recent        []deployRow
+	AgentVersions []verRow
+	Msg           string
+	Err           string
 }
 
 // PackagesPage — GET /packages : дистрибутивы, загрузка, раздача, история.
@@ -123,6 +130,7 @@ func (a *App) PackagesPage(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 	}
+	data.AgentVersions = a.agentVersions()
 	web.RenderPage(w, "packages", data)
 }
 
@@ -232,6 +240,71 @@ func (a *App) DeployPackage(w http.ResponseWriter, r *http.Request) {
 	}
 	auth.LogAction(a.DB, user.ID, "package_deploy", p.Name, strconv.Itoa(len(targets))+" устройств")
 	http.Redirect(w, r, "/packages?message=Установка+поставлена+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
+}
+
+// DeployAgentUpdate — POST /packages/agent-update (admin) : разослать новую
+// сборку агента на все машины с агентом.
+//
+// Переиспользует механизм дистрибутивов: файл agent.exe загружается как обычный
+// пакет, а задача отличается видом — агент не устанавливает его, а подменяет
+// себя, предварительно проверив контрольную сумму и запуск новой сборки.
+func (a *App) DeployAgentUpdate(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil || !user.IsAdmin() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	_ = r.ParseForm()
+	pkgID, _ := strconv.ParseInt(r.FormValue("package_id"), 10, 64)
+	var p installPayload
+	if a.DB.QueryRow(`SELECT id, COALESCE(name,''), COALESCE(kind,''), COALESCE(filename,''), COALESCE(sha256,'')
+		FROM packages WHERE id=?`, pkgID).Scan(&p.ID, &p.Name, &p.Kind, &p.Filename, &p.SHA256) != nil {
+		http.Redirect(w, r, "/packages?error=Сборка+не+найдена", http.StatusSeeOther)
+		return
+	}
+	if p.Kind != "exe" {
+		http.Redirect(w, r, "/packages?error=Сборка+агента+должна+быть+.exe", http.StatusSeeOther)
+		return
+	}
+	if p.SHA256 == "" {
+		http.Redirect(w, r, "/packages?error=У+сборки+нет+контрольной+суммы", http.StatusSeeOther)
+		return
+	}
+
+	targets := a.agentDeviceIDs()
+	if len(targets) == 0 {
+		http.Redirect(w, r, "/packages?error=Нет+устройств+с+агентом", http.StatusSeeOther)
+		return
+	}
+	payload, _ := json.Marshal(p)
+	for _, id := range targets {
+		a.enqueueTask(id, "selfupdate", string(payload), "Обновление агента: "+p.Name, user.ID)
+	}
+	auth.LogAction(a.DB, user.ID, "agent_update", p.Name, strconv.Itoa(len(targets))+" устройств")
+	http.Redirect(w, r, "/packages?message=Обновление+агента+поставлено+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
+}
+
+// agentVersions — сводка версий агента по парку (что уже обновилось).
+func (a *App) agentVersions() []verRow {
+	rows, err := a.DB.Query(`SELECT COALESCE(NULLIF(agent_version,''),'неизвестна'), COUNT(*)
+		FROM devices WHERE COALESCE(agent_token,'')<>''
+		GROUP BY 1 ORDER BY 2 DESC`)
+	if err != nil {
+		log.Printf("версии агента: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var out []verRow
+	for rows.Next() {
+		var v verRow
+		if rows.Scan(&v.Version, &v.Count) == nil {
+			out = append(out, v)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("версии агента: %v", err)
+	}
+	return out
 }
 
 // AgentPackageDownload — GET /api/agent-package?id=N : агент скачивает дистрибутив (по токену).

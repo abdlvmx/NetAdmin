@@ -28,6 +28,8 @@ func runTask(kind, payload string) (status, output string, code int) {
 		return runLibraryCommand(payload)
 	case "install":
 		return installPackage(payload)
+	case "selfupdate":
+		return selfUpdate(payload)
 	default:
 		return "failed", "неизвестная задача: " + kind, 1
 	}

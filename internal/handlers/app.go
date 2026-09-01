@@ -59,6 +59,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /packages/upload", a.UploadPackage)
 	mux.HandleFunc("POST /packages/deploy", a.DeployPackage)
 	mux.HandleFunc("POST /packages/{id}/delete", a.DeletePackage)
+	// раскатка новой сборки агента на весь парк
+	mux.HandleFunc("POST /packages/agent-update", a.DeployAgentUpdate)
 
 	// Сотрудники и отделы
 	mux.HandleFunc("GET /employees", a.EmployeesPage)

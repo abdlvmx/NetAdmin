@@ -223,15 +223,16 @@ func (a *App) AgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var d struct {
-		Hostname    string  `json:"hostname"`
-		OS          string  `json:"os"`
-		CPU         float64 `json:"cpu"`
-		RAM         float64 `json:"ram"`
-		Disk        float64 `json:"disk"`
-		CPUModel    string  `json:"cpu_model"`
-		RAMTotalGB  int     `json:"ram_total_gb"`
-		DiskTotalGB int     `json:"disk_total_gb"`
-		OSVersion   string  `json:"os_version"`
+		Hostname     string  `json:"hostname"`
+		OS           string  `json:"os"`
+		CPU          float64 `json:"cpu"`
+		RAM          float64 `json:"ram"`
+		Disk         float64 `json:"disk"`
+		CPUModel     string  `json:"cpu_model"`
+		RAMTotalGB   int     `json:"ram_total_gb"`
+		DiskTotalGB  int     `json:"disk_total_gb"`
+		OSVersion    string  `json:"os_version"`
+		AgentVersion string  `json:"agent_version"`
 	}
 	if err := json.Unmarshal(ag.Body, &d); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -287,11 +288,13 @@ func (a *App) AgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		cpu_model=CASE WHEN ?<>'' THEN ? ELSE cpu_model END,
 		ram_total_gb=CASE WHEN ?>0 THEN ? ELSE ram_total_gb END,
 		disk_total_gb=CASE WHEN ?>0 THEN ? ELSE disk_total_gb END,
-		os_version=CASE WHEN ?<>'' THEN ? ELSE os_version END
+		os_version=CASE WHEN ?<>'' THEN ? ELSE os_version END,
+		agent_version=CASE WHEN ?<>'' THEN ? ELSE agent_version END
 		WHERE id=?`,
 		d.OS, d.CPU, d.RAM, d.Disk,
 		d.CPUModel, d.CPUModel, d.RAMTotalGB, d.RAMTotalGB,
-		d.DiskTotalGB, d.DiskTotalGB, d.OSVersion, d.OSVersion, deviceID)
+		d.DiskTotalGB, d.DiskTotalGB, d.OSVersion, d.OSVersion,
+		d.AgentVersion, d.AgentVersion, deviceID)
 	// историю метрик пишем пачкой в фоне (батч + ретеншн в воркере)
 	a.Ingest.Metric(ingest.MetricRow{DeviceID: deviceID, CPU: d.CPU, RAM: d.RAM, Disk: d.Disk})
 

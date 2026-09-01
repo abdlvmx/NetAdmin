@@ -369,6 +369,7 @@ func InitSchema(d *sql.DB) error {
 		{"devices", "ram_total_gb", "INTEGER DEFAULT 0"},
 		{"devices", "disk_total_gb", "INTEGER DEFAULT 0"},
 		{"devices", "os_version", "TEXT DEFAULT ''"},
+		{"devices", "agent_version", "TEXT DEFAULT ''"},
 		{"sessions", "last_activity", "TEXT"},
 	} {
 		safeAddColumn(d, m.table, m.col, m.def)

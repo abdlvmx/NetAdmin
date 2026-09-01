@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -27,6 +28,10 @@ import (
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+// agentVersion — версия сборки агента. Уходит в heartbeat, чтобы на сервере
+// было видно, какие машины ещё не обновились.
+const agentVersion = "1.1.0"
 
 var (
 	serverURL = envOr("NETADMIN_SERVER_URL", "http://127.0.0.1:8765")
@@ -155,11 +160,12 @@ func collectMetrics() map[string]any {
 		diskPct = du.UsedPercent
 	}
 	m := map[string]any{
-		"hostname": host,
-		"os":       osName(),
-		"cpu":      round1(cpuPct),
-		"ram":      round1(ramPct),
-		"disk":     round1(diskPct),
+		"hostname":      host,
+		"os":            osName(),
+		"cpu":           round1(cpuPct),
+		"ram":           round1(ramPct),
+		"disk":          round1(diskPct),
+		"agent_version": agentVersion,
 	}
 	for k, v := range hardwareInfo() {
 		m[k] = v
@@ -318,7 +324,16 @@ func dueDisks(last string) bool {
 }
 
 func main() {
-	log.Printf("NetAdmin agent → %s", serverURL)
+	// Флаг версии используется механизмом самообновления: скачанная сборка
+	// запускается с ним как проверка, что файл рабочий, — только после этого
+	// агент подменяет себя.
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println(agentVersion)
+		return
+	}
+
+	log.Printf("NetAdmin agent %s → %s", agentVersion, serverURL)
+	cleanupOldBinary() // остаток прошлого самообновления
 	st := loadState()
 	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
 	if deviceToken == "" && token == "" {
@@ -455,5 +470,11 @@ func pollTasks() {
 		_, _, _ = post("/api/agent-tasks/result", map[string]any{
 			"id": t.ID, "status": status, "result": output, "exit_code": code,
 		})
+		// Самообновление завершается перезапуском, и только после отправки
+		// результата: иначе сервер не узнал бы, чем закончилась задача.
+		if restartPending {
+			restartIntoNewBinary()
+			return
+		}
 	}
 }
