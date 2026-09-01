@@ -90,12 +90,14 @@
       padding: 20px 22px 16px; font-size: 16px; font-weight: 800;
       color: var(--text); letter-spacing: -0.3px; display: flex; align-items: center; gap: 11px;
     }
+    /* Плоская плашка вместо градиента со свечением: строгий тон вместо
+       рекламного. Цвет один — акцентный. */
     .sidebar-logo .mark {
-      width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
-      background: linear-gradient(135deg, var(--accent), #8b5cf6);
-      display: flex; align-items: center; justify-content: center; font-size: 17px;
-      box-shadow: 0 4px 12px rgba(79,70,229,.35);
+      width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+      background: var(--accent); color: #fff;
+      display: flex; align-items: center; justify-content: center;
     }
+    .sidebar-logo .mark .ico { width: 19px; height: 19px; }
     .sidebar-logo small { display: block; font-size: 11px; color: var(--muted); font-weight: 500; letter-spacing: 0; }
     .nav { padding: 4px 14px 14px; flex: 1; overflow-y: auto; }
     .nav a {
@@ -109,25 +111,43 @@
       content: ""; position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
       width: 3px; height: 22px; border-radius: 0 4px 4px 0; background: var(--accent);
     }
-    .nav a .icon { font-size: 16px; width: 20px; text-align: center; opacity: .92; }
+    /* Спрайт с иконками не показывается сам по себе — только через <use>. */
+    .icon-sprite { display: none; }
+    /* Штриховые значки наследуют цвет текста, поэтому активный пункт и
+       наведение подсвечивают иконку вместе с подписью. */
+    .ico {
+      width: 18px; height: 18px; flex-shrink: 0;
+      fill: none; stroke: currentColor; stroke-width: 1.75;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .nav a .ico { opacity: .85; }
+    .nav a.active .ico, .nav a:hover .ico { opacity: 1; }
     .nav .section-label {
       font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
       color: var(--muted); padding: 16px 12px 6px; opacity: .65; font-weight: 700;
     }
     .sidebar-user {
       padding: 12px 14px; border-top: 1px solid var(--border);
-      display: flex; align-items: center; gap: 10px;
+      display: flex; align-items: center; gap: 6px;
     }
+    .sidebar-user-link {
+      flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+      padding: 4px 6px; margin: -4px -6px; border-radius: var(--radius-sm);
+      color: inherit; transition: background .14s;
+    }
+    .sidebar-user-link:hover { background: var(--surface-2); }
+    .sidebar-user-link.active { background: var(--accent-soft); }
     .avatar {
       width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0;
-      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      background: var(--accent);
       display: flex; align-items: center; justify-content: center;
       font-weight: 700; font-size: 14px; color: #fff;
     }
-    .sidebar-user-info { flex: 1; min-width: 0; }
-    .sidebar-user-info .name { font-size: 13px; font-weight: 700;
+    .sidebar-user-info { flex: 1; min-width: 0; display: block; }
+    .sidebar-user-info .name { display: block; font-size: 13px; font-weight: 700;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sidebar-user-info .role { font-size: 11.5px; color: var(--muted); text-transform: capitalize; }
+    .sidebar-user-info .role { display: block; font-size: 11.5px; color: var(--muted); text-transform: capitalize; }
+    .logout-form { display: inline-flex; }
     .icon-btn { display: inline-flex; align-items: center; justify-content: center;
       font-size: 15px; color: var(--muted); cursor: pointer; width: 32px; height: 32px;
       border-radius: 9px; border: none; background: transparent; transition: background .14s, color .14s; }
@@ -320,8 +340,11 @@
 
     @media (max-width: 860px) {
       .sidebar { width: 66px; }
-      .sidebar-logo small, .nav a span:not(.icon), .nav .section-label, .sidebar-user-info, .sidebar-logo .brand { display: none; }
+      .sidebar-logo small, .nav a .label, .nav .section-label, .sidebar-user-info, .sidebar-logo .brand { display: none; }
       .nav a { justify-content: center; }
+      /* в свёрнутом виде остаются только значки — подпись даёт всплывающая подсказка */
+      .sidebar-user { justify-content: center; flex-wrap: wrap; }
+      .sidebar-user-link { flex: 0 0 auto; }
       .main { margin-left: 66px; }
       .content, .topbar { padding-left: 18px; padding-right: 18px; }
       .grid-2, .grid-2.even { grid-template-columns: 1fr; }
@@ -334,48 +357,87 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 {{if .User}}
+{{/* Набор иконок. Один спрайт на страницу; в разметке — ссылка через <use>.
+     Эмодзи в навигации заменены на штриховые значки: они выглядят одинаково
+     во всех системах и не задают игривого тона. */}}
+<svg class="icon-sprite" aria-hidden="true" focusable="false"><defs>
+  <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+  <symbol id="i-devices" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-antenna" viewBox="0 0 24 24"><circle cx="12" cy="10" r="2"/><path d="M8.5 6.5a5 5 0 0 0 0 7M15.5 6.5a5 5 0 0 1 0 7M5.5 3.5a9 9 0 0 0 0 13M18.5 3.5a9 9 0 0 1 0 13M12 12v9"/></symbol>
+  <symbol id="i-changes" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></symbol>
+  <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M3 9V6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6z"/><path d="M13 5v14"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-package" viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></symbol>
+  <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 6a3 3 0 0 1 0 6M18 20a5 5 0 0 0-2-4"/></symbol>
+  <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></symbol>
+  <symbol id="i-uptime" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 1-9 9"/><path d="M8 12l3 3 5-6"/></symbol>
+  <symbol id="i-disk" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 13h20"/><circle cx="7" cy="16" r="1"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8.5-8 9.5-4.5-1-8-4.5-8-9.5V6z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.5 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 15H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 9 4.6V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 19.4 9H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 2z"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+  <symbol id="i-exit" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5M5 12h11"/></symbol>
+</defs></svg>
+
 <aside class="sidebar">
   <div class="sidebar-logo">
-    <span class="mark">🛡</span><div class="brand">NetAdmin<small>Управление сетью</small></div>
+    <span class="mark"><svg class="ico"><use href="#i-shield"/></svg></span>
+    <div class="brand">NetAdmin<small>Управление сетью</small></div>
   </div>
   <nav class="nav">
-    <div class="section-label">Обзор</div>
-    <a href="/dashboard" class="{{if eq .Active "dashboard"}}active{{end}}"><span class="icon">📊</span> <span>Дашборд</span></a>
-    <div class="section-label">Управление</div>
-    <a href="/users" class="{{if eq .Active "users"}}active{{end}}"><span class="icon">👥</span> <span>Пользователи</span></a>
-    <a href="/employees" class="{{if eq .Active "employees"}}active{{end}}"><span class="icon">🪪</span> <span>Сотрудники</span></a>
-    <a href="/devices" class="{{if eq .Active "devices"}}active{{end}}"><span class="icon">💻</span> <span>Устройства</span></a>
-    <a href="/tickets" class="{{if eq .Active "tickets"}}active{{end}}"><span class="icon">🎫</span> <span>Заявки</span></a>
-    <a href="/commands" class="{{if eq .Active "commands"}}active{{end}}"><span class="icon">⌨️</span> <span>Команды</span></a>
-    <a href="/packages" class="{{if eq .Active "packages"}}active{{end}}"><span class="icon">📦</span> <span>Установка ПО</span></a>
-    <a href="/licenses" class="{{if eq .Active "licenses"}}active{{end}}"><span class="icon">🧾</span> <span>Лицензии ПО</span></a>
-    <a href="/forbidden" class="{{if eq .Active "forbidden"}}active{{end}}"><span class="icon">🚫</span> <span>Запрещённое ПО</span></a>
-    <a href="/network-map" class="{{if eq .Active "network_map"}}active{{end}}"><span class="icon">🌐</span> <span>Карта сети</span></a>
-    <a href="/network-changes" class="{{if eq .Active "network_changes"}}active{{end}}"><span class="icon">🔄</span> <span>Изменения сети</span></a>
-    <a href="/discovery" class="{{if eq .Active "discovery"}}active{{end}}"><span class="icon">🔎</span> <span>Обнаружение</span></a>
+    <a title="Дашборд" href="/dashboard" class="{{if eq .Active "dashboard"}}active{{end}}"><svg class="ico"><use href="#i-dashboard"/></svg> <span class="label">Дашборд</span></a>
+
+    <div class="section-label">Устройства</div>
+    <a title="Список" href="/devices" class="{{if eq .Active "devices"}}active{{end}}"><svg class="ico"><use href="#i-devices"/></svg> <span class="label">Список</span></a>
+    <a title="Карта сети" href="/network-map" class="{{if eq .Active "network_map"}}active{{end}}"><svg class="ico"><use href="#i-map"/></svg> <span class="label">Карта сети</span></a>
+    <a title="Обнаружение" href="/discovery" class="{{if eq .Active "discovery"}}active{{end}}"><svg class="ico"><use href="#i-search"/></svg> <span class="label">Обнаружение</span></a>
+    <a title="SNMP-устройства" href="/snmp" class="{{if eq .Active "snmp"}}active{{end}}"><svg class="ico"><use href="#i-antenna"/></svg> <span class="label">SNMP-устройства</span></a>
+    <a title="Изменения сети" href="/network-changes" class="{{if eq .Active "network_changes"}}active{{end}}"><svg class="ico"><use href="#i-changes"/></svg> <span class="label">Изменения сети</span></a>
+    <a title="Зависимости" href="/topology" class="{{if eq .Active "topology"}}active{{end}}"><svg class="ico"><use href="#i-link"/></svg> <span class="label">Зависимости</span></a>
+
+    <div class="section-label">Обслуживание</div>
+    <a title="Заявки" href="/tickets" class="{{if eq .Active "tickets"}}active{{end}}"><svg class="ico"><use href="#i-ticket"/></svg> <span class="label">Заявки</span></a>
+    <a title="Команды" href="/commands" class="{{if eq .Active "commands"}}active{{end}}"><svg class="ico"><use href="#i-terminal"/></svg> <span class="label">Команды</span></a>
+    <a title="Установка ПО" href="/packages" class="{{if eq .Active "packages"}}active{{end}}"><svg class="ico"><use href="#i-package"/></svg> <span class="label">Установка ПО</span></a>
+
+    <div class="section-label">Учёт</div>
+    <a title="Сотрудники" href="/employees" class="{{if eq .Active "employees"}}active{{end}}"><svg class="ico"><use href="#i-people"/></svg> <span class="label">Сотрудники</span></a>
+    <a title="Лицензии ПО" href="/licenses" class="{{if eq .Active "licenses"}}active{{end}}"><svg class="ico"><use href="#i-receipt"/></svg> <span class="label">Лицензии ПО</span></a>
+    <a title="Запрещённое ПО" href="/forbidden" class="{{if eq .Active "forbidden"}}active{{end}}"><svg class="ico"><use href="#i-ban"/></svg> <span class="label">Запрещённое ПО</span></a>
+
     <div class="section-label">Мониторинг</div>
-    <a href="/monitoring" class="{{if eq .Active "monitoring"}}active{{end}}"><span class="icon">📈</span> <span>Сервисы</span></a>
-    <a href="/sla" class="{{if eq .Active "sla"}}active{{end}}"><span class="icon">📊</span> <span>Доступность (SLA)</span></a>
-    <a href="/capacity" class="{{if eq .Active "capacity"}}active{{end}}"><span class="icon">📉</span> <span>Прогноз ёмкости</span></a>
-    <a href="/disk-health" class="{{if eq .Active "disk_health"}}active{{end}}"><span class="icon">💾</span> <span>Здоровье дисков</span></a>
-    <a href="/snmp" class="{{if eq .Active "snmp"}}active{{end}}"><span class="icon">📡</span> <span>SNMP-устройства</span></a>
-    <a href="/topology" class="{{if eq .Active "topology"}}active{{end}}"><span class="icon">🗺️</span> <span>Зависимости</span></a>
-    <a href="/profile" class="{{if eq .Active "profile"}}active{{end}}"><span class="icon">👤</span> <span>Профиль</span></a>
+    <a title="Сервисы" href="/monitoring" class="{{if eq .Active "monitoring"}}active{{end}}"><svg class="ico"><use href="#i-activity"/></svg> <span class="label">Сервисы</span></a>
+    <a title="Доступность" href="/sla" class="{{if eq .Active "sla"}}active{{end}}"><svg class="ico"><use href="#i-uptime"/></svg> <span class="label">Доступность</span></a>
+    <a title="Здоровье дисков" href="/disk-health" class="{{if eq .Active "disk_health"}}active{{end}}"><svg class="ico"><use href="#i-disk"/></svg> <span class="label">Здоровье дисков</span></a>
+    <a title="Прогноз ёмкости" href="/capacity" class="{{if eq .Active "capacity"}}active{{end}}"><svg class="ico"><use href="#i-trend"/></svg> <span class="label">Прогноз ёмкости</span></a>
+
     {{if eq .User.Role "admin"}}
     <div class="section-label">Администрирование</div>
-    <a href="/audit" class="{{if eq .Active "audit"}}active{{end}}"><span class="icon">📋</span> <span>Журнал действий</span></a>
-    <a href="/settings" class="{{if eq .Active "settings"}}active{{end}}"><span class="icon">⚙</span> <span>Настройки</span></a>
+    <a title="Пользователи" href="/users" class="{{if eq .Active "users"}}active{{end}}"><svg class="ico"><use href="#i-shield"/></svg> <span class="label">Пользователи</span></a>
+    <a title="Журнал действий" href="/audit" class="{{if eq .Active "audit"}}active{{end}}"><svg class="ico"><use href="#i-list"/></svg> <span class="label">Журнал действий</span></a>
+    <a title="Настройки" href="/settings" class="{{if eq .Active "settings"}}active{{end}}"><svg class="ico"><use href="#i-settings"/></svg> <span class="label">Настройки</span></a>
     {{end}}
   </nav>
   <div class="sidebar-user">
-    <div class="avatar">{{upper (slice .User.Username 0 1)}}</div>
-    <div class="sidebar-user-info">
-      <div class="name">{{.User.Username}}</div>
-      <div class="role">{{.User.Role}}</div>
-    </div>
-    <button class="icon-btn" onclick="toggleTheme()" title="Светлая / тёмная тема" id="theme-toggle">🌙</button>
-    <form method="post" action="/logout" style="display:inline">
-      <button type="submit" class="icon-btn logout" title="Выйти" style="border:0;background:none;cursor:pointer;font:inherit">⎋</button>
+    {{/* Профиль открывается из карточки пользователя, а не отдельным пунктом
+         меню: раньше он стоял в группе «Мониторинг», где ему не место. */}}
+    <a href="/profile" class="sidebar-user-link{{if eq .Active "profile"}} active{{end}}" title="Профиль и смена пароля">
+      <span class="avatar">{{upper (slice .User.Username 0 1)}}</span>
+      <span class="sidebar-user-info">
+        <span class="name">{{.User.Username}}</span>
+        <span class="role">{{.User.Role}}</span>
+      </span>
+    </a>
+    <button class="icon-btn" onclick="toggleTheme()" title="Светлая / тёмная тема" id="theme-toggle"><svg class="ico"><use href="#i-moon"/></svg></button>
+    <form method="post" action="/logout" class="logout-form">
+      <button type="submit" class="icon-btn logout" title="Выйти"><svg class="ico"><use href="#i-exit"/></svg></button>
     </form>
   </div>
 </aside>
@@ -414,10 +476,12 @@ function toast(msg, type) {
   } catch (e) {}
 })();
 
+// Значок темы переключается сменой ссылки в <use>. Раньше здесь стоял
+// textContent с эмодзи, который затирал вставленный в кнопку <svg>.
 function applyThemeIcon() {
   var dark = document.documentElement.getAttribute('data-theme') === 'dark';
-  var b = document.getElementById('theme-toggle');
-  if (b) b.textContent = dark ? '☀️' : '🌙';
+  var u = document.querySelector('#theme-toggle use');
+  if (u) u.setAttribute('href', dark ? '#i-sun' : '#i-moon');
 }
 function toggleTheme() {
   var dark = document.documentElement.getAttribute('data-theme') === 'dark';
