@@ -46,10 +46,19 @@ func csrfExempt(path string) bool {
 	return strings.HasPrefix(path, "/api/agent-") || path == "/login" || path == "/setup"
 }
 
-// withSecurity оборачивает роутер: security-заголовки + CSRF (double-submit).
+// withSecurity оборачивает роутер: ограничение по подсетям, security-заголовки
+// и CSRF (double-submit).
 func (a *App) withSecurity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		securityHeaders(w)
+
+		// Канал не шифруется, поэтому доступ ограничен разрешёнными подсетями.
+		// Проверка идёт до всего остального: обращение из чужой сети не должно
+		// доходить ни до аутентификации, ни до публичного портала заявок.
+		if !a.Allow.Allows(clientIP(r)) {
+			http.Error(w, "доступ из этой сети запрещён", http.StatusForbidden)
+			return
+		}
 
 		// ограничение размера тела запроса (анти-DoS)
 		bodyLimit := int64(1 << 20) // 1 МБ по умолчанию

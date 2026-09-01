@@ -6,12 +6,17 @@ import (
 	"net/http"
 
 	"netadmin/internal/ingest"
+	"netadmin/internal/netaccess"
 )
 
 // App держит общие зависимости хендлеров.
 type App struct {
 	DB     *sql.DB
 	Ingest *ingest.Writer
+	// Allow — подсети, которым разрешён доступ. Нулевое значение означает
+	// «только локальные и частные сети», поэтому пустая конфигурация
+	// не открывает сервер наружу.
+	Allow netaccess.List
 }
 
 // Routes собирает маршруты приложения (с security-обёрткой).

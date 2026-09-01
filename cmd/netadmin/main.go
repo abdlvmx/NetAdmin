@@ -16,6 +16,7 @@ import (
 	"netadmin/internal/db"
 	"netadmin/internal/handlers"
 	"netadmin/internal/ingest"
+	"netadmin/internal/netaccess"
 )
 
 func main() {
@@ -42,9 +43,16 @@ func main() {
 		}
 	}()
 
+	// разрешённые подсети: по умолчанию только локальные и частные сети
+	allow, err := netaccess.Parse(os.Getenv("NETADMIN_ALLOW"))
+	if err != nil {
+		log.Fatalf("NETADMIN_ALLOW: %v", err)
+	}
+
 	app := &handlers.App{
 		DB:     database,
 		Ingest: ingest.New(database, config.MetricsRetentionDays, config.EventsRetentionDays, config.AuditRetentionDays),
+		Allow:  allow,
 	}
 
 	// мониторинг доступности критичных устройств (uptime-алерты)
@@ -93,7 +101,44 @@ func main() {
 	}
 
 	log.Printf("NetAdmin слушает %s (UI: http://127.0.0.1:%s)", listenAddr, port)
+	log.Printf("Доступ разрешён с адресов: %s", allow)
+	if allow.Unrestricted() {
+		log.Print("ВНИМАНИЕ: NETADMIN_ALLOW=any — ограничение по подсетям снято, " +
+			"сервер обслуживает любые адреса. Канал не шифруется, используйте только в доверенной сети.")
+	}
+	logReachableAddrs(port)
+
 	log.Fatal(http.ListenAndServe(listenAddr, app.Routes()))
+}
+
+// logReachableAddrs печатает адреса, по которым сервер доступен агентам,
+// и предупреждает, если среди них есть публичный: продукт не предназначен
+// для работы за пределами локальной сети.
+func logReachableAddrs(port string) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return
+	}
+	var lan, public []string
+	for _, a := range addrs {
+		n, ok := a.(*net.IPNet)
+		if !ok || n.IP.IsLoopback() || n.IP.To4() == nil {
+			continue // в подсказке для агентов показываем только IPv4
+		}
+		ip := n.IP.String()
+		if n.IP.IsPrivate() || n.IP.IsLinkLocalUnicast() {
+			lan = append(lan, ip)
+		} else {
+			public = append(public, ip)
+		}
+	}
+	for _, ip := range lan {
+		log.Printf("Адрес для агентов: NETADMIN_SERVER_URL=http://%s:%s", ip, port)
+	}
+	for _, ip := range public {
+		log.Printf("ВНИМАНИЕ: на интерфейсе публичный адрес %s — закройте порт %s "+
+			"брандмауэром (см. deploy/firewall_server.bat)", ip, port)
+	}
 }
 
 func getenv(key, def string) string {
