@@ -2,14 +2,18 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"netadmin/internal/auth"
@@ -124,7 +128,27 @@ func main() {
 		IdleTimeout:    2 * time.Minute,
 		MaxHeaderBytes: 1 << 20,
 	}
-	log.Fatal(srv.ListenAndServe())
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen: %v", err)
+		}
+	}()
+
+	// Корректная остановка. Без неё рвались текущие запросы, а метрики из
+	// буфера ingest пропадали: они пишутся пачками и обычный перезапуск
+	// сервера терял всё, что не успело уйти в базу.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+
+	log.Print("остановка: дожидаюсь текущих запросов и дописываю метрики...")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("остановка сервера: %v", err)
+	}
+	app.Ingest.Close()
+	log.Print("остановлено")
 }
 
 // logReachableAddrs печатает адреса, по которым сервер доступен агентам,

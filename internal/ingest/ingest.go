@@ -5,6 +5,7 @@ package ingest
 import (
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -16,10 +17,10 @@ type MetricRow struct {
 
 // EventRow — событие безопасности (DeviceID==0 → NULL; Ts=="" → datetime('now')).
 type EventRow struct {
-	DeviceID                                       int64
-	Hostname, Ts, Source                           string
-	EventID                                        int
-	Severity, Category, Message, Detail            string
+	DeviceID                            int64
+	Hostname, Ts, Source                string
+	EventID                             int
+	Severity, Category, Message, Detail string
 }
 
 // Writer принимает строки в каналы и пишет их пачками в фоне.
@@ -30,6 +31,10 @@ type Writer struct {
 	metricsDays int
 	eventsDays  int
 	auditDays   int
+
+	quit      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 const (
@@ -49,9 +54,22 @@ func New(db *sql.DB, metricsDays, eventsDays, auditDays int) *Writer {
 		metricsDays: metricsDays,
 		eventsDays:  eventsDays,
 		auditDays:   auditDays,
+		quit:        make(chan struct{}),
+		done:        make(chan struct{}),
 	}
 	go w.run()
 	return w
+}
+
+// Close останавливает воркер, дописав накопленное. Без него всё, что лежит
+// в буфере и в каналах на момент остановки, пропадает: метрики копятся до
+// сотни строк или до пяти секунд, и обычный перезапуск сервера их терял.
+func (w *Writer) Close() {
+	w.closeOnce.Do(func() { close(w.quit) })
+	select {
+	case <-w.done:
+	case <-time.After(10 * time.Second):
+	}
 }
 
 // Metric ставит строку метрик в очередь (не блокирует; при переполнении — дроп).
@@ -107,6 +125,21 @@ func (w *Writer) run() {
 			w.prune()
 		case <-rollupT.C:
 			w.rollup()
+		case <-w.quit:
+			// добираем всё, что уже попало в каналы, и дописываем разом
+			for drained := true; drained; {
+				drained = false
+				select {
+				case m := <-w.metrics:
+					mbuf, drained = append(mbuf, m), true
+				case e := <-w.events:
+					ebuf, drained = append(ebuf, e), true
+				default:
+				}
+			}
+			flush()
+			close(w.done)
+			return
 		}
 	}
 }
