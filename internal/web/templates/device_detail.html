@@ -361,6 +361,10 @@ async function loadMetrics(){
 }
 function drawLines(canvas, points){
   const dpr = window.devicePixelRatio||1, w = canvas.clientWidth, h = canvas.clientHeight;
+  // Вкладка может быть ещё скрыта — тогда размеры нулевые. Рисовать в такой
+  // холст нельзя: canvas.width задаёт и внутренний размер, и, при отсутствии
+  // CSS-размера, внешний — картинка поехала бы при каждой перерисовке.
+  if(!w || !h) return;
   canvas.width=w*dpr; canvas.height=h*dpr;
   const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
   const padL=34,padR=10,padT=10,padB=22, plotW=w-padL-padR, plotH=h-padT-padB;

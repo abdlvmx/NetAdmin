@@ -19,57 +19,59 @@
 
     :root {
       color-scheme: light;
-      --bg:          #f5f6fb;
+      /* Нейтральная серая шкала без синего подтона и приглушённый акцент:
+         насыщенный индиго читался как рекламный, а не как рабочий инструмент. */
+      --bg:          #f7f7f8;
       --surface:     #ffffff;
-      --surface-2:   #f1f3f9;
-      --surface-3:   #e8ebf4;
-      --border:      #e7e9f1;
-      --border-2:    #d8dce8;
-      --text:        #181d2a;
-      --text-2:      #3b4456;
-      --muted:       #6a7387;
-      --accent:      #4f46e5;
-      --accent-hov:  #4338ca;
-      --accent-soft: #ecedfe;
-      --green:       #0f9d6a;  --green-soft: #e2f6ef;
-      --red:         #e2474d;  --red-soft:   #fcebec;
-      --amber:       #d4810b;  --amber-soft: #faf0db;
-      --violet:      #7c5cff;  --violet-soft:#efeaff;
-      --ring:        0 0 0 3px rgba(79,70,229,.16);
+      --surface-2:   #f2f3f4;
+      --surface-3:   #e8eaec;
+      --border:      #e3e5e8;
+      --border-2:    #cfd3d8;
+      --text:        #1a1d21;
+      --text-2:      #3d434b;
+      --muted:       #6b7280;
+      --accent:      #2f4a7a;
+      --accent-hov:  #24395e;
+      --accent-soft: #eaeef4;
+      --green:       #157347;  --green-soft: #e8f1ec;
+      --red:         #a72834;  --red-soft:   #f7eaec;
+      --amber:       #8a5a00;  --amber-soft: #f6f0e4;
+      --violet:      #4b4a7a;  --violet-soft:#eeeef4;
+      --ring:        0 0 0 3px rgba(47,74,122,.18);
       /* Шкала радиусов — три ступени вместо шести разрозненных значений. */
-      --radius:      10px;
-      --radius-sm:   8px;
-      --radius-xs:   6px;
+      --radius:      6px;
+      --radius-sm:   5px;
+      --radius-xs:   3px;
       /* Тени только обозначают край, а не «поднимают» элемент над страницей. */
-      --shadow:      0 1px 2px rgba(20,30,60,.05);
-      --shadow-lg:   0 8px 24px rgba(18,24,46,.12);
-      --scrollbar:   #ccd2e0;
+      --shadow:      none;
+      --shadow-lg:   0 6px 20px rgba(20,24,32,.12);
+      --scrollbar:   #c8ccd2;
       --sidebar-bg:  #ffffff;
     }
 
     :root[data-theme="dark"] {
       color-scheme: dark;
-      --bg:          #0a0e18;
-      --surface:     #131a27;
-      --surface-2:   #1a2230;
-      --surface-3:   #232d3f;
-      --border:      #222b3c;
-      --border-2:    #303b52;
-      --text:        #e9eef7;
-      --text-2:      #b7c0d2;
-      --muted:       #8f9aaf;
-      --accent:      #7c83ff;
-      --accent-hov:  #9499ff;
-      --accent-soft: rgba(124,131,255,.15);
-      --green:       #2fd084;  --green-soft: rgba(47,208,132,.13);
-      --red:         #f0686d;  --red-soft:   rgba(240,104,109,.15);
-      --amber:       #f0a73a;  --amber-soft: rgba(240,167,58,.14);
-      --violet:      #a98bff;  --violet-soft:rgba(169,139,255,.16);
-      --ring:        0 0 0 3px rgba(124,131,255,.30);
-      --shadow:      0 1px 2px rgba(0,0,0,.35);
-      --shadow-lg:   0 8px 26px rgba(0,0,0,.45);
-      --scrollbar:   #333f57;
-      --sidebar-bg:  #0d131f;
+      --bg:          #101215;
+      --surface:     #17191d;
+      --surface-2:   #1e2126;
+      --surface-3:   #272b31;
+      --border:      #282c32;
+      --border-2:    #3a3f47;
+      --text:        #e6e8ea;
+      --text-2:      #b4b9c0;
+      --muted:       #8b919a;
+      --accent:      #8fa9d4;
+      --accent-hov:  #a8bde0;
+      --accent-soft: rgba(143,169,212,.13);
+      --green:       #5cbd8a;  --green-soft: rgba(92,189,138,.12);
+      --red:         #d97a80;  --red-soft:   rgba(217,122,128,.13);
+      --amber:       #cfa055;  --amber-soft: rgba(207,160,85,.13);
+      --violet:      #9a9ac4;  --violet-soft:rgba(154,154,196,.13);
+      --ring:        0 0 0 3px rgba(143,169,212,.28);
+      --shadow:      none;
+      --shadow-lg:   0 6px 22px rgba(0,0,0,.5);
+      --scrollbar:   #343941;
+      --sidebar-bg:  #131518;
     }
 
     /* Пять ступеней размера вместо девяти близких значений и четыре ступени
@@ -93,7 +95,7 @@
       transition: background .22s ease, color .22s ease;
     }
     a { color: var(--accent); text-decoration: none; }
-    h1, h2, h3 { letter-spacing: -0.2px; font-weight: 700; }
+    h1, h2, h3 { letter-spacing: 0; font-weight: 600; }
 
     /* ===== SIDEBAR ===== */
     .sidebar {
@@ -108,8 +110,8 @@
     /* Плоская плашка вместо градиента со свечением: строгий тон вместо
        рекламного. Цвет один — акцентный. */
     .sidebar-logo .mark {
-      width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
-      background: var(--accent); color: #fff;
+      width: 30px; height: 30px; border-radius: var(--radius-sm); flex-shrink: 0;
+      background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border);
       display: flex; align-items: center; justify-content: center;
     }
     .sidebar-logo .mark .ico { width: 19px; height: 19px; }
@@ -121,7 +123,7 @@
       margin-bottom: 1px; transition: background .14s, color .14s;
     }
     .nav a:hover { background: var(--surface-2); color: var(--text); }
-    .nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+    .nav a.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
     .nav a.active::before {
       content: ""; position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
       width: 3px; height: 22px; border-radius: 0 4px 4px 0; background: var(--accent);
@@ -153,10 +155,10 @@
     .sidebar-user-link:hover { background: var(--surface-2); }
     .sidebar-user-link.active { background: var(--accent-soft); }
     .avatar {
-      width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0;
-      background: var(--accent);
+      width: 30px; height: 30px; border-radius: var(--radius-sm); flex-shrink: 0;
+      background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border);
       display: flex; align-items: center; justify-content: center;
-      font-weight: 700; font-size: var(--fs-md); color: #fff;
+      font-weight: 600; font-size: var(--fs-sm);
     }
     .sidebar-user-info { flex: 1; min-width: 0; display: block; }
     .sidebar-user-info .name { display: block; font-size: var(--fs-md); font-weight: 700;
@@ -172,7 +174,7 @@
     /* ===== MAIN ===== */
     .main { margin-left: 250px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
     .topbar { padding: 22px 28px 4px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-    .topbar h1 { font-size: var(--fs-xl); font-weight: 700; }
+    .topbar h1 { font-size: var(--fs-xl); font-weight: 600; }
     .topbar .sub { font-size: var(--fs-sm); color: var(--muted); margin-top: 3px; }
     .content { padding: 18px 28px 40px; flex: 1; max-width: 1540px; width: 100%; }
 
@@ -190,8 +192,8 @@
     /* Карточки сводки не «подпрыгивают» при наведении: это данные, а не кнопки. */
     .stat-card:hover, .summary-card:hover { border-color: var(--border-2); }
     .stat-label, .summary-card .lbl { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 6px; font-weight: 500; }
-    .stat-value, .summary-card .num { font-size: var(--fs-num); font-weight: 700; line-height: 1.1;
-      letter-spacing: -0.4px; font-variant-numeric: tabular-nums; }
+    .stat-value, .summary-card .num { font-size: var(--fs-num); font-weight: 600; line-height: 1.15;
+      letter-spacing: 0; font-variant-numeric: tabular-nums; }
     .stat-sub { font-size: var(--fs-sm); color: var(--muted); margin-top: 4px; }
 
     /* ===== GRID HELPERS ===== */
@@ -200,8 +202,9 @@
     .mt-4 { margin-top: 16px; }
 
     /* ===== BADGES ===== */
-    .badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: var(--radius-xs);
-      font-size: var(--fs-xs); font-weight: 600; line-height: 1.6; white-space: nowrap; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: var(--radius-xs);
+      font-size: var(--fs-xs); font-weight: 500; line-height: 1.7; white-space: nowrap;
+      border: 1px solid currentColor; }
     .badge-green { background: var(--green-soft); color: var(--green); }
     .badge-red   { background: var(--red-soft);   color: var(--red); }
     .badge-amber { background: var(--amber-soft);  color: var(--amber); }
@@ -250,6 +253,15 @@
     th[data-sort][data-asc="true"], th[data-sort][data-asc="false"] { color: var(--accent); }
     th[data-sort][data-asc="true"]::after  { content: " ↑"; opacity: 1; }
     th[data-sort][data-asc="false"]::after { content: " ↓"; opacity: 1; }
+
+    /* ===== CHARTS =====
+       Стиль холста живёт здесь, а не в каждом шаблоне: его копии в dashboard
+       и devices расходились, а на карточке устройства правила просто не было —
+       холст падал к дефолтным 300x150 вместо ширины карточки. */
+    .chart-canvas { width: 100%; height: 260px; display: block; }
+    /* Заглушка занимает высоту графика: иначе при переключении периода
+       на пустой карточка скачком меняла размер. */
+    .chart-canvas + .empty { height: 260px; display: flex; align-items: center; justify-content: center; }
 
     /* ===== DONUT ===== */
     .donut-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
