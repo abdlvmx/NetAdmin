@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -57,6 +58,9 @@ func (a *App) forbiddenScan() ([]forbRule, []forbFinding, int) {
 				rules = append(rules, fr)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("forbiddenScan: %v", err)
+		}
 		rows.Close()
 	}
 	var findings []forbFinding
@@ -78,6 +82,9 @@ func (a *App) forbiddenScan() ([]forbRule, []forbFinding, int) {
 				findings = append(findings, forbFinding{Hostname: host, Software: sw, Category: fr.Category})
 				hosts[host] = true
 			}
+		}
+		if err := frows.Err(); err != nil {
+			log.Printf("forbiddenScan: %v", err)
 		}
 		frows.Close()
 	}

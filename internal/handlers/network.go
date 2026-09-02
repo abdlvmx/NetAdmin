@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -134,6 +135,9 @@ func (a *App) PerformScan() (int, string) {
 				toOffline = append(toOffline, o)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("PerformScan: %v", err)
+		}
 		rows.Close()
 		for _, o := range toOffline {
 			a.DB.Exec("UPDATE devices SET status='offline' WHERE id=?", o.id)
@@ -163,6 +167,9 @@ func (a *App) FastPing() {
 		if rows.Scan(&d.id, &d.ip) == nil {
 			list = append(list, d)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("FastPing: %v", err)
 	}
 	rows.Close()
 	for _, d := range list {

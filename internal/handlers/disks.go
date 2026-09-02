@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -98,6 +99,9 @@ func (a *App) AgentDisks(w http.ResponseWriter, r *http.Request) {
 				prevBad[key] = assessDisk(diskInfo{Health: health, WearPct: wear, PredictFail: pf == 1}).Severity == "critical"
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("AgentDisks: %v", err)
+		}
 		rows.Close()
 	}
 
@@ -168,6 +172,9 @@ func (a *App) DeviceDisks(w http.ResponseWriter, r *http.Request) {
 				it.Severity, it.Issue = v.Severity, v.Issue
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceDisks: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"disks": items})
@@ -242,6 +249,9 @@ func (a *App) DiskHealthPage(w http.ResponseWriter, r *http.Request) {
 				data.Warnings++
 			}
 			data.Rows = append(data.Rows, row)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DiskHealthPage: %v", err)
 		}
 	}
 	data.Hosts = len(hosts)

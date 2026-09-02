@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -59,6 +60,9 @@ func (a *App) TopologyPage(w http.ResponseWriter, r *http.Request) {
 				data.Links = append(data.Links, l)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("TopologyPage: %v", err)
+		}
 		rows.Close()
 	}
 
@@ -80,6 +84,9 @@ func (a *App) TopologyPage(w http.ResponseWriter, r *http.Request) {
 				impMap[parent] = append(impMap[parent], child)
 			}
 		}
+		if err := irows.Err(); err != nil {
+			log.Printf("TopologyPage: %v", err)
+		}
 		irows.Close()
 		for _, p := range order {
 			data.Impacts = append(data.Impacts, topoImpact{Parent: p, Dependents: impMap[p]})
@@ -94,6 +101,9 @@ func (a *App) TopologyPage(w http.ResponseWriter, r *http.Request) {
 			if drows.Scan(&o.ID, &o.Name) == nil {
 				data.Devices = append(data.Devices, o)
 			}
+		}
+		if err := drows.Err(); err != nil {
+			log.Printf("TopologyPage: %v", err)
 		}
 		drows.Close()
 	}

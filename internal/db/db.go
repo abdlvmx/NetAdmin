@@ -3,6 +3,7 @@ package db
 
 import (
 	"database/sql"
+	"log"
 
 	_ "modernc.org/sqlite"
 )
@@ -393,6 +394,9 @@ func safeAddColumn(d *sql.DB, table, col, def string) {
 		if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil && name == col {
 			return // уже есть
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("safeAddColumn: %v", err)
 	}
 	d.Exec("ALTER TABLE " + table + " ADD COLUMN " + col + " " + def)
 }

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"netadmin/internal/auth"
@@ -63,6 +64,9 @@ func (a *App) SLAPage(w http.ResponseWriter, r *http.Request) {
 			}
 			sr.Rating = slaRating(sr.Uptime, total)
 			data.Rows = append(data.Rows, sr)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("SLAPage: %v", err)
 		}
 	}
 	if cnt > 0 {

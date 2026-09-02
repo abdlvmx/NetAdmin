@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,6 +34,9 @@ func (a *App) RunDueChecks() {
 			if rows.Scan(&c.id, &c.name, &c.typ, &c.target, &c.prevS) == nil {
 				due = append(due, c)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("RunDueChecks: %v", err)
 		}
 		rows.Close()
 	}
@@ -106,6 +110,9 @@ func (a *App) ServiceMonitorPage(w http.ResponseWriter, r *http.Request) {
 			}
 			data.Total++
 			data.Rows = append(data.Rows, c)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("ServiceMonitorPage: %v", err)
 		}
 	}
 	web.RenderPage(w, "servicemon", data)

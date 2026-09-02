@@ -105,6 +105,9 @@ func (a *App) PackagesPage(w http.ResponseWriter, r *http.Request) {
 				data.Packages = append(data.Packages, p)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("PackagesPage: %v", err)
+		}
 		rows.Close()
 	}
 	if rows, err := a.DB.Query(`SELECT id, hostname FROM devices WHERE COALESCE(agent_token,'')<>'' ORDER BY hostname`); err == nil {
@@ -113,6 +116,9 @@ func (a *App) PackagesPage(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&o.ID, &o.Name) == nil {
 				data.Devices = append(data.Devices, o)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("PackagesPage: %v", err)
 		}
 		rows.Close()
 	}
@@ -127,6 +133,9 @@ func (a *App) PackagesPage(w http.ResponseWriter, r *http.Request) {
 				row.Created = tz.DateTime(created)
 				data.Recent = append(data.Recent, row)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("PackagesPage: %v", err)
 		}
 		rows.Close()
 	}

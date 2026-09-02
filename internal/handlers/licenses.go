@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -53,6 +54,9 @@ func (a *App) LicensesPage(w http.ResponseWriter, r *http.Request) {
 			}
 			data.TotalCost += lr.Cost
 			data.Rows = append(data.Rows, lr)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("LicensesPage: %v", err)
 		}
 	}
 	web.RenderPage(w, "licenses", data)

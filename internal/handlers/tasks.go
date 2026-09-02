@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -52,6 +53,9 @@ func (a *App) AgentTasksPoll(w http.ResponseWriter, r *http.Request) {
 				if rows.Scan(&t.ID, &t.Kind, &t.Payload) == nil {
 					tasks = append(tasks, t)
 				}
+			}
+			if err := rows.Err(); err != nil {
+				log.Printf("AgentTasksPoll: %v", err)
 			}
 			rows.Close()
 		}
@@ -122,6 +126,9 @@ func (a *App) DeviceTasks(w http.ResponseWriter, r *http.Request) {
 				it.Done = tz.DateTime(done)
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceTasks: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"tasks": items})

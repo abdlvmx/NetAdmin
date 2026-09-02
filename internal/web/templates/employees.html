@@ -124,8 +124,9 @@
 {{end}}
 
 {{define "scripts"}}
+<div id="emp-data" hidden data-json="{{.EmployeesJSON}}"></div>
 <script>
-const EMPLOYEES = {{.EmployeesJSON}} || [];
+const EMPLOYEES = JSON.parse(document.getElementById("emp-data").dataset.json || "[]");
 const EFIELDS = ["full_name","position","email","phone","department_id","notes"];
 function openModal(id){ document.getElementById(id).classList.add('open'); }
 function closeModal(id){ document.getElementById(id).classList.remove('open'); }

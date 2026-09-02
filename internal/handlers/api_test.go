@@ -1,6 +1,14 @@
 package handlers
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"netadmin/internal/auth"
+	"netadmin/internal/web"
+)
 
 // metricSeries за 30 дней должен объединять свежее сырьё и старые агрегаты.
 func TestMetricSeriesRawPlusRollup(t *testing.T) {
@@ -38,4 +46,41 @@ func TestMetricSeriesRawPlusRollup(t *testing.T) {
 			t.Fatalf("агрегат 20-дневной давности попал в окно 24ч")
 		}
 	}
+}
+
+// Справочник сотрудников уезжает в data-атрибут и разбирается через JSON.parse.
+// Раньше он вставлялся в тело скрипта через template.JS — экранирование там
+// отключено, и защита держалась только на поведении json.Marshal.
+func TestEmployeesJSONIsEscapedInAttribute(t *testing.T) {
+	app := newTestApp(t)
+	app.DB.Exec("INSERT INTO departments (name) VALUES ('Отдел')")
+	app.DB.Exec(`INSERT INTO employees (full_name, position, department_id, is_active)
+		VALUES (?, 'Тестер', 1, 1)`, `</script><script>alert(1)</script>`)
+
+	rec := httptest.NewRecorder()
+	web.RenderPage(rec, "employees", employeesData{
+		User: &auth.User{ID: 1, Username: "admin", Role: "admin"}, Active: "employees",
+		Employees:     app.listEmployeesFull(),
+		EmployeesJSON: employeesJSON(t, app),
+	})
+	body := rec.Body.String()
+	if strings.Contains(body, "template error") {
+		t.Fatalf("ошибка шаблона: %s", body)
+	}
+	if strings.Contains(body, "<script>alert(1)</script>") {
+		t.Fatal("разметка из имени сотрудника попала в страницу без экранирования")
+	}
+	if !strings.Contains(body, `id="emp-data"`) {
+		t.Fatal("данные должны уезжать в data-атрибут")
+	}
+}
+
+// employeesJSON повторяет то, что делает обработчик страницы.
+func employeesJSON(t *testing.T, app *App) string {
+	t.Helper()
+	raw, err := json.Marshal(app.listEmployeesFull())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(raw)
 }

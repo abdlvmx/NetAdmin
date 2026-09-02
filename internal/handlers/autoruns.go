@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -51,6 +52,9 @@ func (a *App) AgentAutoruns(w http.ResponseWriter, r *http.Request) {
 					prevCorrupt = true
 				}
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("AgentAutoruns: %v", err)
 		}
 		rows.Close()
 	}
@@ -105,6 +109,9 @@ func (a *App) DeviceAutoruns(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&it.Location, &it.Name, &it.Command) == nil {
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceAutoruns: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"autoruns": items})

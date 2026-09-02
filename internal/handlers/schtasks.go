@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -53,6 +54,9 @@ func (a *App) AgentSchTasks(w http.ResponseWriter, r *http.Request) {
 					prevCorrupt = true
 				}
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("AgentSchTasks: %v", err)
 		}
 		rows.Close()
 	}
@@ -115,6 +119,9 @@ func (a *App) DeviceSchTasks(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&it.Path, &it.Name, &it.Action, &it.State) == nil {
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceSchTasks: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"tasks": items})

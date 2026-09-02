@@ -67,6 +67,9 @@ func (a *App) NetworkMapAPI(w http.ResponseWriter, r *http.Request) {
 			n.Subnet = subnetOf(n.IP)
 			nodes = append(nodes, n)
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("NetworkMapAPI: %v", err)
+		}
 	}
 
 	// Связи берём только объявленные на странице «Зависимости». Раньше карта

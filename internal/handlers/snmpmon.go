@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -156,6 +157,9 @@ func (a *App) persistPorts(snmpID int64, ports []portSample) {
 				pm[idx] = prev{in, out, t}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("persistPorts: %v", err)
+		}
 		rows.Close()
 	}
 	now := time.Now().UTC()
@@ -221,6 +225,9 @@ func (a *App) RunDueSNMP() {
 			if rows.Scan(&d.id, &d.name, &d.ip, &d.port, &d.comm, &d.kind, &d.ps) == nil {
 				due = append(due, d)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("RunDueSNMP: %v", err)
 		}
 		rows.Close()
 	}
@@ -296,6 +303,9 @@ func (a *App) SNMPDevicesPage(w http.ResponseWriter, r *http.Request) {
 			}
 			data.Total++
 			data.Rows = append(data.Rows, row)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("SNMPDevicesPage: %v", err)
 		}
 	}
 	web.RenderPage(w, "snmp", data)
@@ -428,6 +438,9 @@ func (a *App) SNMPPortsPage(w http.ResponseWriter, r *http.Request) {
 				data.UpCount++
 			}
 			data.Rows = append(data.Rows, pr)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("SNMPPortsPage: %v", err)
 		}
 	}
 	web.RenderPage(w, "snmp_ports", data)

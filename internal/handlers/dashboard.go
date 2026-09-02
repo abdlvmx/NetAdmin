@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"html/template"
+	"log"
 	"math"
 	"net/http"
 
@@ -129,6 +130,9 @@ func (a *App) topDevices() []deviceLoad {
 		}
 		out = append(out, d)
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("topDevices: %v", err)
+	}
 	return out
 }
 
@@ -149,6 +153,9 @@ func (a *App) recentActivity() []auditRow {
 			l.CreatedAt = tz.Time(l.CreatedAt)
 			out = append(out, l)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("recentActivity: %v", err)
 	}
 	return out
 }

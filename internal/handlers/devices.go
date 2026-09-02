@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -179,6 +180,9 @@ func (a *App) listDevices() []deviceRow {
 		d.LastSeen = tz.DateTime(d.LastSeen)
 		out = append(out, d)
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("listDevices: %v", err)
+	}
 	return out
 }
 
@@ -197,6 +201,9 @@ func (a *App) listEmployees() []employeeOpt {
 		if rows.Scan(&e.ID, &e.Name, &e.Dept) == nil {
 			out = append(out, e)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("listEmployees: %v", err)
 	}
 	return out
 }

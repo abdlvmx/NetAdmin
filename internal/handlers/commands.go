@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,6 +78,9 @@ func (a *App) CommandsPage(w http.ResponseWriter, r *http.Request) {
 				data.Devices = append(data.Devices, o)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("CommandsPage: %v", err)
+		}
 		rows.Close()
 	}
 
@@ -91,6 +95,9 @@ func (a *App) CommandsPage(w http.ResponseWriter, r *http.Request) {
 				row.Created = tz.DateTime(created)
 				data.Recent = append(data.Recent, row)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("CommandsPage: %v", err)
 		}
 		rows.Close()
 	}

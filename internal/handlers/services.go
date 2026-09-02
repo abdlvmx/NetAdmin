@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -49,6 +50,9 @@ func (a *App) AgentServices(w http.ResponseWriter, r *http.Request) {
 				prev[n] = true
 				had = true
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("AgentServices: %v", err)
 		}
 		rows.Close()
 	}
@@ -112,6 +116,9 @@ func (a *App) DeviceServices(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&it.DisplayName, &it.Name, &it.StartType, &it.Path) == nil {
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceServices: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"services": items})

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -178,6 +179,9 @@ func (a *App) HelpTrack(w http.ResponseWriter, r *http.Request) {
 				c.Created = tz.DateTime(created)
 				data.Comments = append(data.Comments, c)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("HelpTrack: %v", err)
 		}
 		rows.Close()
 	}

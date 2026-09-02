@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"sort"
 
@@ -47,6 +48,9 @@ func (a *App) CapacityPage(w http.ResponseWriter, r *http.Request) {
 				devs = append(devs, d)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("CapacityPage: %v", err)
+		}
 		rows.Close()
 	}
 
@@ -84,6 +88,9 @@ func (a *App) dailySeries(deviceID int64, col string) []float64 {
 		if rows.Scan(&day, &v) == nil {
 			out = append(out, v)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("dailySeries: %v", err)
 	}
 	return out
 }

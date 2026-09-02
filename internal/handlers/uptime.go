@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"netadmin/internal/netscan"
@@ -32,6 +33,9 @@ func (a *App) CheckCritical() {
 		if rows.Scan(&d.id, &d.host, &d.ip, &d.streak, &d.downSince) == nil {
 			list = append(list, d)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("CheckCritical: %v", err)
 	}
 	rows.Close()
 

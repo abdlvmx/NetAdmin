@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -45,6 +46,9 @@ func (a *App) AgentSoftware(w http.ResponseWriter, r *http.Request) {
 				prev[n] = true
 				had = true
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("AgentSoftware: %v", err)
 		}
 		rows.Close()
 	}
@@ -109,6 +113,9 @@ func (a *App) DeviceSoftware(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&it.Name, &it.Version, &it.InstallDate) == nil {
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceSoftware: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"software": items})
