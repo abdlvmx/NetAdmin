@@ -26,6 +26,19 @@
   .score-good { color: var(--green); } .score-medium { color: #d97706; } .score-poor { color: var(--red); }
   .bar-good { background: var(--green); } .bar-medium { background: #d97706; } .bar-poor { background: var(--red); }
 
+  /* Сводка проблем: одна строка на источник, число справа, вся строка — ссылка
+     в свой раздел. Красная точка — то, что уже сломано, янтарная — то, что
+     сломается, если не вмешаться. */
+  .issues { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 8px; }
+  .issue { display: flex; align-items: center; gap: 10px; padding: 10px 12px; text-decoration: none;
+    color: inherit; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--surface); transition: border-color .12s; }
+  .issue:hover { border-color: var(--accent); }
+  .issue-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--amber); }
+  .issue-dot.crit { background: var(--red); }
+  .issue-label { flex: 1; font-size: 13px; }
+  .issue-num { font-weight: 700; font-variant-numeric: tabular-nums; }
+
   .dash-row { display: grid; grid-template-columns: 1.7fr 1fr 1fr; gap: 16px; }
   .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
   .tabs button { border: none; background: transparent; color: var(--muted); font-size: 13px;
@@ -101,7 +114,22 @@
     </div>
   </div>
 
-  <div class="dash-row">
+  <div class="card" style="margin-top:16px">
+    <div class="card-header"><span class="card-title">Требует внимания</span></div>
+    {{if .Issues}}
+    <div class="issues">
+      {{range .Issues}}
+      <a class="issue" href="{{.Href}}">
+        <span class="issue-dot{{if .Crit}} crit{{end}}"></span>
+        <span class="issue-label">{{.Label}}</span>
+        <span class="issue-num">{{.Count}}</span>
+      </a>
+      {{end}}
+    </div>
+    {{else}}<div class="empty">Открытых проблем нет.</div>{{end}}
+  </div>
+
+  <div class="dash-row" style="margin-top:16px">
     <div class="card">
       <div class="card-header">
         <span class="card-title">Нагрузка по парку устройств</span>
