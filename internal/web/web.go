@@ -8,6 +8,7 @@ package web
 import (
 	"embed"
 	"html/template"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -16,6 +17,26 @@ import (
 
 //go:embed templates
 var fsys embed.FS
+
+//go:embed static
+var staticFS embed.FS
+
+// Static отдаёт встроенные скрипты. Вынесены из HTML, чтобы политика
+// безопасности могла запретить исполняемый код внутри страницы: без этого
+// в script-src приходится держать unsafe-inline, который снимает основную
+// защиту от внедрения скриптов.
+func Static() http.Handler {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic("web: встроенная статика недоступна: " + err.Error())
+	}
+	srv := http.FileServer(http.FS(sub))
+	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// файлы меняются только вместе с бинарником, но пусть браузер сверяется
+		w.Header().Set("Cache-Control", "no-cache")
+		srv.ServeHTTP(w, r)
+	}))
+}
 
 var funcMap = template.FuncMap{
 	"upper":       strings.ToUpper,

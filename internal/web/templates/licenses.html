@@ -83,7 +83,7 @@
             <td class="text-muted">{{printf "%.0f" .Cost}} ₽</td>
             {{if eq $.User.Role "admin"}}
             <td>
-              <form method="post" action="/licenses/{{.ID}}/delete" onsubmit="return confirm('Удалить лицензию «{{.Name}}»?')">
+              <form method="post" action="/licenses/{{.ID}}/delete" data-confirm="Удалить лицензию «{{.Name}}»?">
                 <button class="btn btn-ghost btn-sm">Удалить</button>
               </form>
             </td>

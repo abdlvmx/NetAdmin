@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{.OrgName}} — Статус заявки</title>
-  <script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <script src="/static/theme.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -127,12 +127,6 @@
   <p class="hint"><a href="/help">← Создать новую заявку</a></p>
 </div>
 
-<script>
-(function () {
-  var m = document.cookie.match('(^|;)\\s*csrf\\s*=\\s*([^;]+)');
-  var tok = m ? m.pop() : '';
-  document.querySelectorAll('input[name=csrf_token]').forEach(function (i) { i.value = tok; });
-})();
-</script>
+<script src="/static/help_track.js" defer></script>
 </body>
 </html>

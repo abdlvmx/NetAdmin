@@ -53,9 +53,9 @@
       <p class="text-muted" style="font-size:12px;margin-bottom:10px">
         Используется агентами для авторизации heartbeat и событий. Храните в тайне.</p>
       <div class="token-box">
-        <input value="{{.AgentToken}}" readonly onclick="this.select()">
+        <input value="{{.AgentToken}}" readonly data-act="selectAll">
         <form method="post" action="/settings/agent-token/rotate"
-              onsubmit="return confirm('Обновить токен? Старый перестанет работать.')">
+              data-confirm="Обновить токен? Старый перестанет работать.">
           <button class="btn btn-ghost">Обновить</button>
         </form>
       </div>

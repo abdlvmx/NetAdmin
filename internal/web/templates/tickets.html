@@ -46,7 +46,7 @@
         </tr></thead>
         <tbody id="tk-body">
           {{range .Rows}}
-          <tr data-status="{{.Status}}" onclick="location.href='/tickets/{{.ID}}'" style="cursor:pointer">
+          <tr data-status="{{.Status}}" data-href="/tickets/{{.ID}}" style="cursor:pointer">
             <td><b>{{.Code}}</b></td>
             <td>{{.Title}}</td>
             <td><span class="badge {{statusBadge .Status}}">{{statusRu .Status}}</span></td>

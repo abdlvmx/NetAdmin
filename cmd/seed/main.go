@@ -184,6 +184,20 @@ func main() {
 		}
 	}
 
+	for _, tk := range []struct{ code, title, cat, status, who string }{
+		{"K7M2QP", "Не печатает принтер в 201 кабинете", "Оборудование", "new", "Смирнова Ольга Петровна"},
+		{"R4TX8N", "Не открывается 1С, ошибка базы", "ПО", "in_progress", "Кузнецов Андрей Сергеевич"},
+		{"B9YH3W", "Забыл пароль от учётной записи", "Доступ", "resolved", "Попова Мария Ивановна"},
+		{"L2QF6K", "Медленно работает компьютер", "Оборудование", "closed", "Васильев Дмитрий Олегович"},
+	} {
+		if _, err := d.Exec(`INSERT INTO tickets (code, title, description, category, status, priority,
+			reporter_name, reporter_email, location)
+			VALUES (?,?,?,?,?, 'normal', ?, 'user@firma.local', 'каб. 201')`,
+			tk.code, tk.title, "Подробное описание проблемы от сотрудника.", tk.cat, tk.status, tk.who); err != nil {
+			log.Fatalf("tickets: %v", err)
+		}
+	}
+
 	// связи топологии: что к какому порту коммутатора подключено
 	for _, l := range []struct{ parent, child, port string }{
 		{"SW-CORE", "SRV-1C", "Gi0/1"},

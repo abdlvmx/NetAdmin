@@ -81,7 +81,7 @@
             <td>
               <div class="row-actions">
                 <form method="post" action="/monitoring/{{.ID}}/toggle"><button class="btn btn-ghost btn-sm">{{if .Enabled}}Выкл{{else}}Вкл{{end}}</button></form>
-                <form method="post" action="/monitoring/{{.ID}}/delete" onsubmit="return confirm('Удалить проверку?')"><button class="btn btn-ghost btn-sm">Удалить</button></form>
+                <form method="post" action="/monitoring/{{.ID}}/delete" data-confirm="Удалить проверку?"><button class="btn btn-ghost btn-sm">Удалить</button></form>
               </div>
             </td>
             {{end}}

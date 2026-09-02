@@ -8,6 +8,7 @@ import (
 
 	"netadmin/internal/ingest"
 	"netadmin/internal/netaccess"
+	"netadmin/internal/web"
 )
 
 // App держит общие зависимости хендлеров.
@@ -23,6 +24,9 @@ type App struct {
 // Routes собирает маршруты приложения (с security-обёрткой).
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
+
+	// встроенные скрипты; доступны без сессии — страница входа тоже их грузит
+	mux.Handle("GET /static/", web.Static())
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))

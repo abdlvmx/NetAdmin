@@ -27,7 +27,7 @@
   {{if .User.CanWrite}}
   <div class="card" style="margin-bottom:18px">
     <div class="card-header"><span class="card-title">Запустить команду</span></div>
-    <form method="post" action="/commands/run" style="padding:14px 18px" onsubmit="return confirmRun()">
+    <form method="post" action="/commands/run" style="padding:14px 18px" data-act-submit="confirmRun">
       <div class="cmd-grid">
         <div>
           <div class="form-group">
@@ -43,7 +43,7 @@
           <div class="form-group">
             <label>Где выполнить</label>
             <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:8px;cursor:pointer">
-              <input type="checkbox" name="all" value="1" id="all-cb" style="width:auto" onchange="document.getElementById('dev-list').style.display=this.checked?'none':'block'"> Все ПК с агентом ({{len .Devices}})
+              <input type="checkbox" name="all" value="1" id="all-cb" style="width:auto" data-act-change="toggleList" data-target="dev-list"> Все ПК с агентом ({{len .Devices}})
             </label>
             <div class="dev-list" id="dev-list">
               {{range .Devices}}<label><input type="checkbox" name="device" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="text-muted">Нет ПК с установленным агентом.</span>{{end}}
@@ -95,20 +95,5 @@
 {{end}}
 
 {{define "scripts"}}
-<script>
-const sel = document.getElementById('cmd-select');
-if(sel){
-  sel.addEventListener('change', function(){
-    const o = sel.options[sel.selectedIndex];
-    document.getElementById('cmd-desc').textContent = o ? (o.dataset.desc||'') : '';
-  });
-}
-function confirmRun(){
-  const o = sel.options[sel.selectedIndex];
-  if(o && o.dataset.danger==='1'){
-    return confirm('Эта команда прервёт работу пользователя. Выполнить?');
-  }
-  return true;
-}
-</script>
+<script src="/static/commands.js" defer></script>
 {{end}}

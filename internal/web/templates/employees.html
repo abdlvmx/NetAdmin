@@ -31,8 +31,8 @@
   </div>
   {{if eq .User.Role "admin"}}
   <div class="flex gap-2">
-    <button class="btn btn-ghost" onclick="openModal('modal-dept')">+ Отдел</button>
-    <button class="btn btn-primary" onclick="openModal('modal-add')">+ Сотрудник</button>
+    <button class="btn btn-ghost" data-modal-open="modal-dept">+ Отдел</button>
+    <button class="btn btn-primary" data-modal-open="modal-add">+ Сотрудник</button>
   </div>
   {{end}}
 </div>
@@ -66,7 +66,7 @@
             <td>
               {{if eq $.User.Role "admin"}}
               <div class="row-actions">
-                <button class="btn btn-ghost btn-sm" onclick="openEditEmp({{.ID}})">Изменить</button>
+                <button class="btn btn-ghost btn-sm" data-act="editEmp" data-id="{{.ID}}">Изменить</button>
                 <form method="post" action="/employees/{{.ID}}/toggle">
                   <button class="btn btn-ghost btn-sm">{{if .IsActive}}Отключить{{else}}Включить{{end}}</button>
                 </form>
@@ -83,39 +83,39 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-add" onclick="closeOnOverlay(event,'modal-add')">
+<div class="modal-overlay" id="modal-add" data-modal-overlay="modal-add">
   <div class="modal modal-wide">
     <h3>Добавить сотрудника</h3>
     <form method="post" action="/employees/create">
       {{template "empFields" .Departments}}
       <div class="modal-footer">
-        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add')">Отмена</button>
+        <button type="button" class="btn btn-ghost" data-modal-close="modal-add">Отмена</button>
         <button type="submit" class="btn btn-primary">Добавить</button>
       </div>
     </form>
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-edit" onclick="closeOnOverlay(event,'modal-edit')">
+<div class="modal-overlay" id="modal-edit" data-modal-overlay="modal-edit">
   <div class="modal modal-wide">
     <h3>Изменить сотрудника</h3>
     <form method="post" action="" id="edit-form">
       {{template "empFields" .Departments}}
       <div class="modal-footer">
-        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-edit')">Отмена</button>
+        <button type="button" class="btn btn-ghost" data-modal-close="modal-edit">Отмена</button>
         <button type="submit" class="btn btn-primary">Сохранить</button>
       </div>
     </form>
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-dept" onclick="closeOnOverlay(event,'modal-dept')">
+<div class="modal-overlay" id="modal-dept" data-modal-overlay="modal-dept">
   <div class="modal">
     <h3>Новый отдел</h3>
     <form method="post" action="/departments/create">
       <div class="form-group"><label>Название отдела</label><input name="name" required></div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-dept')">Отмена</button>
+        <button type="button" class="btn btn-ghost" data-modal-close="modal-dept">Отмена</button>
         <button type="submit" class="btn btn-primary">Создать</button>
       </div>
     </form>
@@ -125,18 +125,5 @@
 
 {{define "scripts"}}
 <div id="emp-data" hidden data-json="{{.EmployeesJSON}}"></div>
-<script>
-const EMPLOYEES = JSON.parse(document.getElementById("emp-data").dataset.json || "[]");
-const EFIELDS = ["full_name","position","email","phone","department_id","notes"];
-function openModal(id){ document.getElementById(id).classList.add('open'); }
-function closeModal(id){ document.getElementById(id).classList.remove('open'); }
-function closeOnOverlay(e,id){ if(e.target===e.currentTarget) closeModal(id); }
-function openEditEmp(id){
-  const e = EMPLOYEES.find(x=>x.id===id); if(!e) return;
-  const form = document.getElementById('edit-form');
-  form.action = `/employees/${id}/update`;
-  EFIELDS.forEach(n=>{ const el=form.elements[n]; if(el) el.value = n==="department_id" ? (e.department_id||"") : (e[n]||""); });
-  openModal('modal-edit');
-}
-</script>
+<script src="/static/employees.js" defer></script>
 {{end}}

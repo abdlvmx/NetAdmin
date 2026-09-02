@@ -73,7 +73,7 @@
               <td><b>{{.Pattern}}</b></td>
               <td>{{.Category}}</td>
               <td class="text-muted">{{if .Note}}{{.Note}}{{else}}—{{end}}</td>
-              <td><form method="post" action="/forbidden/{{.ID}}/delete" onsubmit="return confirm('Удалить правило?')"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
+              <td><form method="post" action="/forbidden/{{.ID}}/delete" data-confirm="Удалить правило?"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
             </tr>
             {{else}}
             <tr><td colspan="4" class="empty">Список пуст. Нажмите «Добавить типовой набор» или внесите правила вручную.</td></tr>

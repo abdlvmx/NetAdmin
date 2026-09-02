@@ -62,8 +62,8 @@
   </div>
   {{if .User.CanWrite}}
   <div class="flex gap-2">
-    <button class="btn btn-ghost" id="scan-btn" onclick="scanNetwork()">Сканировать сеть</button>
-    <button class="btn btn-primary" onclick="openModal('modal-add')">+ Добавить</button>
+    <button class="btn btn-ghost" id="scan-btn" data-act="scanNetwork">Сканировать сеть</button>
+    <button class="btn btn-primary" data-modal-open="modal-add">+ Добавить</button>
   </div>
   {{end}}
 </div>
@@ -131,8 +131,8 @@
               <div class="row-actions">
                 <a class="btn btn-ghost btn-sm" href="/devices/{{.ID}}" title="Открыть страницу устройства">Открыть</a>
                 {{if $.User.CanWrite}}
-                {{if .IP}}<button class="btn btn-ghost btn-sm" onclick="pingDevice('{{.IP}}',{{.ID}})">Ping</button>{{end}}
-                {{if .IP}}<button class="btn btn-ghost btn-sm" onclick="scanPorts({{.ID}},this)">Порты</button>{{end}}
+                {{if .IP}}<button class="btn btn-ghost btn-sm" data-act="ping" data-ip="{{.IP}}" data-id="{{.ID}}">Ping</button>{{end}}
+                {{if .IP}}<button class="btn btn-ghost btn-sm" data-act="ports" data-id="{{.ID}}">Порты</button>{{end}}
                 {{end}}
               </div>
             </td>
@@ -146,13 +146,13 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-add" onclick="closeOnOverlay(event,'modal-add')">
+<div class="modal-overlay" id="modal-add" data-modal-overlay="modal-add">
   <div class="modal modal-wide">
     <h3>Добавить устройство</h3>
     <form method="post" action="/devices/create">
       {{template "deviceFields" .Employees}}
       <div class="modal-footer">
-        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add')">Отмена</button>
+        <button type="button" class="btn btn-ghost" data-modal-close="modal-add">Отмена</button>
         <button type="submit" class="btn btn-primary">Добавить</button>
       </div>
     </form>
@@ -162,86 +162,5 @@
 {{end}}
 
 {{define "scripts"}}
-<script>
-function openModal(id){ document.getElementById(id).classList.add('open'); }
-function closeModal(id){ document.getElementById(id).classList.remove('open'); }
-function closeOnOverlay(e,id){ if(e.target===e.currentTarget) closeModal(id); }
-
-async function scanNetwork(){
-  const b = document.getElementById('scan-btn');
-  const old = b.textContent;
-  b.disabled = true; b.textContent = 'Сканирование…';
-  try{
-    const r = await fetch('/api/scan',{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}});
-    const d = await r.json();
-    b.textContent = `Найдено: ${d.found}`;
-    toast(`Сканирование завершено: найдено устройств — ${d.found}`, 'ok');
-    setTimeout(()=>location.reload(), 900);
-  }catch(e){
-    b.textContent = 'Ошибка'; b.disabled = false;
-    toast('Ошибка сканирования сети', 'err');
-    setTimeout(()=>{ b.textContent = old; }, 1500);
-  }
-}
-
-async function pingDevice(ip,id){
-  const el = document.getElementById('status-'+id);
-  el.innerHTML = '<span class="badge badge-amber">пинг…</span>';
-  try{
-    const r = await fetch('/api/ping',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':window.csrfToken},body:JSON.stringify({ip})});
-    const d = await r.json();
-    el.innerHTML = d.status==='online'
-      ? '<span class="badge badge-green">онлайн</span>'
-      : '<span class="badge badge-red">оффлайн</span>';
-  }catch(e){ el.innerHTML = '<span class="badge badge-gray">ошибка</span>'; }
-}
-
-async function scanPorts(id, btn){
-  const old = btn.textContent; btn.disabled = true; btn.textContent = 'Скан…';
-  try{
-    const r = await fetch(`/devices/${id}/scan-ports`,{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}});
-    const d = await r.json();
-    if(d.ok){ toast('Открытые порты: ' + (d.ports && d.ports.length ? d.ports.join(', ') : 'нет'), 'ok'); setTimeout(()=>location.reload(), 900); }
-    else { toast(d.error || 'Ошибка', 'err'); btn.disabled=false; btn.textContent=old; }
-  }catch(e){ toast('Ошибка сканирования портов', 'err'); btn.disabled=false; btn.textContent=old; }
-}
-
-// ── авто-обновление статусов устройств (без перезагрузки) ──
-function statusBadge(s){
-  if(s==='online')  return '<span class="badge badge-green">онлайн</span>';
-  if(s==='offline') return '<span class="badge badge-red">оффлайн</span>';
-  return '<span class="badge badge-gray">неизвестно</span>';
-}
-async function refreshStatuses(){
-  if(document.hidden) return; // не дёргаем сервер, если вкладка не активна
-  try{
-    const d = await (await fetch('/api/devices/status')).json();
-    (d.devices||[]).forEach(dev=>{
-      const st = document.getElementById('status-'+dev.id);
-      if(st) st.innerHTML = statusBadge(dev.status);
-      const sn = document.getElementById('seen-'+dev.id);
-      if(sn) sn.textContent = dev.last_seen || '—';
-      const row = document.getElementById('row-'+dev.id);
-      if(row) row.dataset.status = dev.status;
-    });
-  }catch(e){}
-}
-setInterval(refreshStatuses, 20000);
-
-// ── применить фильтр из URL (клики с дашборда: ?status=offline, ?alerts=1) ──
-window.addEventListener('DOMContentLoaded', ()=>{
-  const p = new URLSearchParams(location.search);
-  const status = p.get('status');
-  if(status){
-    const sel = document.querySelector('select[data-col="status"]');
-    if(sel){ sel.value = status; sel.dispatchEvent(new Event('change')); }
-  }
-  if(p.get('alerts')==='1'){
-    document.querySelectorAll('#dev-body tr').forEach(tr=>{
-      if(tr.querySelector('td')) tr.style.display = (tr.dataset.alert==='1') ? '' : 'none';
-    });
-    toast('Показаны устройства с предупреждениями (оффлайн / перегруз / нет связи)', '');
-  }
-});
-</script>
+<script src="/static/devices.js" defer></script>
 {{end}}

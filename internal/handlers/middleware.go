@@ -45,10 +45,20 @@ func securityHeaders(w http.ResponseWriter) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "same-origin")
-	// всё своё (go:embed), внешних ресурсов нет; inline нужен для наших стилей/скриптов
+	// Всё своё (go:embed), внешних ресурсов нет.
+	//
+	// script-src без unsafe-inline: скрипты вынесены в /static, обработчики
+	// в атрибутах заменены делегированием по data-атрибутам. Это главная часть
+	// защиты — внедрённая разметка не сможет выполнить код.
+	//
+	// style-src оставляет unsafe-inline осознанно: в шаблонах больше двухсот
+	// атрибутов style=", которые эта директива запрещает наравне с блоками
+	// <style>. Переверстать их — работа несопоставимая с выигрышем: подмена
+	// оформления не даёт выполнения кода, а вывод и без того экранируется.
 	h.Set("Content-Security-Policy",
 		"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "+
-			"script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'")
+			"script-src 'self'; connect-src 'self'; frame-ancestors 'none'; "+
+			"base-uri 'none'; form-action 'self'; object-src 'none'")
 }
 
 // ensureCSRF возвращает CSRF-токен из cookie, создавая его при отсутствии.

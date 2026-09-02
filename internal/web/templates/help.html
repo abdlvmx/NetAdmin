@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{.OrgName}} — Заявка в ИТ-службу</title>
-  <script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <script src="/static/theme.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -121,13 +121,6 @@
   <p class="hint">Уже отправляли заявку? <a href="/help/track">Проверить статус по коду</a></p>
 </div>
 
-<script>
-// Double-submit CSRF: подставляем токен из cookie в скрытое поле формы.
-(function () {
-  var m = document.cookie.match('(^|;)\\s*csrf\\s*=\\s*([^;]+)');
-  var tok = m ? m.pop() : '';
-  document.querySelectorAll('input[name=csrf_token]').forEach(function (i) { i.value = tok; });
-})();
-</script>
+<script src="/static/help.js" defer></script>
 </body>
 </html>

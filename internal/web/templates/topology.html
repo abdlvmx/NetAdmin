@@ -65,7 +65,7 @@
             <td>{{.Child}}{{if .ChildOffline}} <span class="badge badge-red">оффлайн</span>{{end}}</td>
             <td class="text-muted">{{if .Port}}{{.Port}}{{else}}—{{end}}</td>
             {{if eq $.User.Role "admin"}}
-            <td><form method="post" action="/topology/{{.ID}}/delete" onsubmit="return confirm('Удалить связь?')"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
+            <td><form method="post" action="/topology/{{.ID}}/delete" data-confirm="Удалить связь?"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
             {{end}}
           </tr>
           {{else}}

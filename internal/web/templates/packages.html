@@ -41,7 +41,8 @@
 
     <div class="card">
       <div class="card-header"><span class="card-title">Раздать установку</span></div>
-      <form method="post" action="/packages/deploy" style="padding:14px 18px">
+      <form method="post" action="/packages/deploy" style="padding:14px 18px"
+            data-confirm="Раздать установку на выбранные ПК?">
         <div class="form-group"><label>Дистрибутив</label>
           <select name="package_id" required>
             <option value="">— выберите —</option>
@@ -51,13 +52,13 @@
         <div class="form-group">
           <label>Где установить</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:8px;cursor:pointer">
-            <input type="checkbox" name="all" value="1" style="width:auto" onchange="document.getElementById('pk-dev-list').style.display=this.checked?'none':'block'"> Все ПК с агентом ({{len .Devices}})
+            <input type="checkbox" name="all" value="1" style="width:auto" data-act-change="toggleList" data-target="pk-dev-list"> Все ПК с агентом ({{len .Devices}})
           </label>
           <div class="dev-list" id="pk-dev-list">
             {{range .Devices}}<label><input type="checkbox" name="device" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="text-muted">Нет ПК с агентом.</span>{{end}}
           </div>
         </div>
-        <button class="btn btn-primary" type="submit" onclick="return confirm('Раздать установку на выбранные ПК?')">Установить</button>
+        <button class="btn btn-primary" type="submit">Установить</button>
       </form>
     </div>
   </div>
@@ -78,15 +79,15 @@
       </div>
       {{end}}
 
-      <form method="post" action="/packages/agent-update">
+      <form method="post" action="/packages/agent-update"
+            data-confirm="Разослать обновление агента на все ПК с агентом?">
         <div class="form-group"><label>Сборка агента (.exe)</label>
           <select name="package_id" required>
             <option value="">— выберите —</option>
             {{range .Packages}}{{if eq .Kind "exe"}}<option value="{{.ID}}">{{.Name}} ({{.SizeMB}})</option>{{end}}{{end}}
           </select>
         </div>
-        <button class="btn btn-primary" type="submit"
-          onclick="return confirm('Разослать обновление агента на все ПК с агентом ({{len .Devices}})?')">Обновить агента на всех ПК</button>
+        <button class="btn btn-primary" type="submit">Обновить агента на всех ПК</button>
       </form>
     </div>
   </div>
@@ -105,7 +106,7 @@
             <td class="text-muted">{{.SizeMB}}</td>
             <td class="text-muted">{{if .Args}}{{.Args}}{{else}}—{{end}}</td>
             <td class="text-muted" style="white-space:nowrap">{{.Created}}</td>
-            <td><form method="post" action="/packages/{{.ID}}/delete" onsubmit="return confirm('Удалить дистрибутив?')"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
+            <td><form method="post" action="/packages/{{.ID}}/delete" data-confirm="Удалить дистрибутив?"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
           </tr>
           {{else}}
           <tr><td colspan="7" class="empty">Дистрибутивов нет. Загрузите .msi/.exe/скрипт для раздачи на ПК.</td></tr>
