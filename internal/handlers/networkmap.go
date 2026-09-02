@@ -1,11 +1,11 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
 	"netadmin/internal/auth"
-	"netadmin/internal/netscan"
 	"netadmin/internal/tz"
 	"netadmin/internal/web"
 )
@@ -28,6 +28,7 @@ func (a *App) NetworkMapAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type node struct {
+		ID       int64  `json:"id"`
 		Hostname string `json:"hostname"`
 		IP       string `json:"ip"`
 		MAC      string `json:"mac"`
@@ -39,7 +40,7 @@ func (a *App) NetworkMapAPI(w http.ResponseWriter, r *http.Request) {
 		Subnet   string `json:"subnet"`
 	}
 
-	rows, err := a.DB.Query(`SELECT hostname, COALESCE(ip_address,''), COALESCE(mac_address,''),
+	rows, err := a.DB.Query(`SELECT id, hostname, COALESCE(ip_address,''), COALESCE(mac_address,''),
 		COALESCE(manufacturer,''), COALESCE(device_type,''), COALESCE(os_type,''), COALESCE(os_guess,''),
 		COALESCE(open_ports,''), COALESCE(critical,0), COALESCE(last_seen,''),
 		CASE
@@ -56,7 +57,7 @@ func (a *App) NetworkMapAPI(w http.ResponseWriter, r *http.Request) {
 			var n node
 			var dtype, osType, osGuess, ports, lastRaw string
 			var crit int
-			if rows.Scan(&n.Hostname, &n.IP, &n.MAC, &n.Vendor, &dtype, &osType, &osGuess,
+			if rows.Scan(&n.ID, &n.Hostname, &n.IP, &n.MAC, &n.Vendor, &dtype, &osType, &osGuess,
 				&ports, &crit, &lastRaw, &n.Status) != nil {
 				continue
 			}
@@ -68,13 +69,29 @@ func (a *App) NetworkMapAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	gateway := "Сеть"
-	if ip, ok := netscan.LocalIPv4(); ok {
-		if p := strings.Split(ip, "."); len(p) == 4 {
-			gateway = p[0] + "." + p[1] + "." + p[2] + ".1"
+	// Связи берём только объявленные на странице «Зависимости». Раньше карта
+	// рисовала линию от каждого узла к предполагаемому шлюзу — эти рёбра
+	// ничего не отражали, а выглядели как настоящая топология.
+	type link struct {
+		From int64  `json:"from"`
+		To   int64  `json:"to"`
+		Port string `json:"port"`
+	}
+	links := []link{}
+	if lr, err := a.DB.Query(`SELECT parent_device_id, child_device_id, COALESCE(port,'')
+		FROM topology_links`); err == nil {
+		defer lr.Close()
+		for lr.Next() {
+			var l link
+			if lr.Scan(&l.From, &l.To, &l.Port) == nil {
+				links = append(links, l)
+			}
+		}
+		if err := lr.Err(); err != nil {
+			log.Printf("связи топологии: %v", err)
 		}
 	}
-	writeJSON(w, map[string]any{"gateway": gateway, "nodes": nodes})
+	writeJSON(w, map[string]any{"nodes": nodes, "links": links})
 }
 
 func subnetOf(ip string) string {

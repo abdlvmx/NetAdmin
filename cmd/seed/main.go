@@ -184,6 +184,22 @@ func main() {
 		}
 	}
 
+	// связи топологии: что к какому порту коммутатора подключено
+	for _, l := range []struct{ parent, child, port string }{
+		{"SW-CORE", "SRV-1C", "Gi0/1"},
+		{"SW-CORE", "SRV-FILE", "Gi0/2"},
+		{"SW-CORE", "PRINTER-BUH", "Gi0/8"},
+		{"SW-CORE", "BUH-01", "Gi0/11"},
+		{"SW-CORE", "BUH-02", "Gi0/12"},
+		{"SRV-1C", "PROIZV-01", ""},
+	} {
+		if _, err := d.Exec(`INSERT INTO topology_links (parent_device_id, child_device_id, port)
+			SELECT p.id, c.id, ? FROM devices p, devices c
+			WHERE p.hostname=? AND c.hostname=?`, l.port, l.parent, l.child); err != nil {
+			log.Fatalf("topology: %v", err)
+		}
+	}
+
 	for _, e := range []struct{ host, sev, cat, msg string }{
 		{"SRV-1C", "critical", "uptime", "Связь с критичным устройством SRV-1C (192.168.1.5) потеряна!"},
 		{"KADR-01", "warning", "software", "Установлено новое ПО: uTorrent"},

@@ -11,12 +11,20 @@
   .map-chips button.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
   .map-chips button .cdot { width: 8px; height: 8px; border-radius: 50%; }
   .map-layout { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }
-  .map-wrap { position: relative; padding: 8px; }
-  #netmap { width: 100%; height: 72vh; min-height: 460px; display: block; }
-  #netmap .edge { stroke: var(--border); stroke-width: 1; }
-  #netmap .guide { fill: none; stroke: var(--border); stroke-dasharray: 3 6; opacity: .5; }
-  #netmap .node { cursor: pointer; transition: opacity .15s, r .12s ease; }
-  #netmap .halo { fill: var(--surface); }
+  .map-wrap { position: relative; padding: 8px; overflow: auto; max-height: 76vh; }
+  #netmap { width: 100%; height: auto; display: block; }
+  #netmap .edge { stroke: var(--border-2); stroke-width: 1.2; }
+  /* Обводка цветом фона отделяет подпись узла от линий, проходящих под ней. */
+  #netmap .nlabel {
+    paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round;
+  }
+  #netmap .edge.hot { stroke: var(--accent); stroke-width: 2; }
+  #netmap .gbox { fill: none; stroke: var(--border); }
+  #netmap .gtitle { font-size: 10px; fill: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  #netmap .nlabel { font-size: 10px; }
+  #netmap .ntype { fill: none; stroke: var(--muted); stroke-width: 1.6; opacity: .75; }
+  #netmap .node { cursor: pointer; transition: r .12s ease; }
+  #netmap g { transition: opacity .15s; }
   #netmap text { font-family: inherit; fill: var(--muted); pointer-events: none; }
   .map-tip { position: absolute; pointer-events: none; z-index: 20; display: none;
     background: var(--surface-3); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
@@ -96,7 +104,7 @@ const STC = { online: cv('--green'), stale: cv('--amber'), offline: cv('--red'),
 const STL = { online:'онлайн', stale:'давно не отвечал', offline:'оффлайн', unknown:'неизвестно' };
 const SORD = { online:0, stale:1, unknown:2, offline:3 };
 
-let allNodes = [], gateway = 'Сеть';
+let allNodes = [], allLinks = [];
 const statusOn = new Set(['online','stale','offline','unknown']);
 const typeOn = new Set();
 let groupBy = 'type';
@@ -106,20 +114,32 @@ function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').repla
 function trunc(s,n){ s=s||''; return s.length>n ? s.slice(0,n-1)+'…' : s; }
 function nodeKey(n){ return (n.hostname+' '+n.ip+' '+n.mac+' '+n.vendor).toLowerCase(); }
 
-function ringLayout(n) {
-  const pos = [], radii = [];
-  const r0 = 135, gap = 90, minArc = 38;
-  let placed = 0, ring = 1;
-  while (placed < n) {
-    const radius = r0 + (ring - 1) * gap;
-    let cap = Math.max(6, Math.floor((2*Math.PI*radius)/minArc));
-    cap = Math.min(cap, n - placed);
-    radii.push(radius);
-    const off = (ring % 2) ? 0 : Math.PI / cap;
-    for (let i=0;i<cap;i++){ const a=(i/cap)*2*Math.PI - Math.PI/2 + off; pos.push({x:radius*Math.cos(a), y:radius*Math.sin(a)}); }
-    placed += cap; ring++;
+// blockLayout раскладывает узлы блоками по группам: внутри блока — сетка,
+// блоки переносятся по строкам. Раньше был круг, где положение узла не значило
+// ничего, а подписи отключались уже на 40 устройствах.
+const CELL_W = 104, CELL_H = 74, BOX_PAD = 14, BOX_HEAD = 22, BOX_GAP = 18;
+
+function blockLayout(groups, maxW) {
+  const boxes = [];
+  let x = 0, y = 0, rowH = 0;
+  for (const g of groups) {
+    const cols = Math.max(1, Math.min(8, Math.ceil(Math.sqrt(g.nodes.length))));
+    const rows = Math.ceil(g.nodes.length / cols);
+    const w = BOX_PAD * 2 + cols * CELL_W;
+    const h = BOX_PAD * 2 + BOX_HEAD + rows * CELL_H;
+    if (x > 0 && x + w > maxW) { x = 0; y += rowH + BOX_GAP; rowH = 0; }
+    const pos = g.nodes.map((n, i) => ({
+      node: n,
+      x: x + BOX_PAD + (i % cols) * CELL_W + CELL_W / 2,
+      y: y + BOX_PAD + BOX_HEAD + Math.floor(i / cols) * CELL_H + 22,
+    }));
+    boxes.push({ title: g.title, x, y, w, h, pos });
+    x += w + BOX_GAP;
+    rowH = Math.max(rowH, h);
   }
-  return { pos, radii, maxR: radii.length ? radii[radii.length-1] : r0 };
+  const width = boxes.length ? Math.max(...boxes.map(b => b.x + b.w)) : 0;
+  const height = y + rowH;
+  return { boxes, width, height };
 }
 
 function visibleNodes(){ return allNodes.filter(n => statusOn.has(n.status) && typeOn.has(n.type)); }
@@ -129,60 +149,95 @@ function render() {
   const svg = document.getElementById('netmap');
   const empty = document.getElementById('map-empty');
   const tip = document.getElementById('map-tip');
-  const nodes = visibleNodes().slice().sort((a,b)=>{
-    const ga=groupKeyOf(a), gb=groupKeyOf(b);
-    if (ga!==gb) return ga<gb?-1:1;
-    return (SORD[a.status]??2)-(SORD[b.status]??2);
-  });
+  const nodes = visibleNodes();
 
   svg.innerHTML = '';
   if (!nodes.length) { empty.style.display='block'; svg.style.display='none'; applySearch(); return; }
   empty.style.display='none'; svg.style.display='block';
 
-  const { pos, radii, maxR } = ringLayout(nodes.length);
-  const showLabels = nodes.length <= 40;
-  const R = maxR + (showLabels ? 78 : 44);
-  svg.setAttribute('viewBox', `${-R} ${-R} ${2*R} ${2*R}`);
+  // группируем и сортируем: проблемные вперёд, чтобы взгляд цеплялся за них
+  const byKey = new Map();
+  nodes.forEach(n => {
+    const k = groupKeyOf(n) || 'Все устройства';
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(n);
+  });
+  const groups = [...byKey.entries()].sort((a,b)=> a[0]<b[0]?-1:1).map(([title, list]) => ({
+    title,
+    nodes: list.sort((a,b)=> (SORD[a.status]??2)-(SORD[b.status]??2) ||
+                             (a.hostname||a.ip||'').localeCompare(b.hostname||b.ip||'')),
+  }));
 
-  const defs = el('defs', {});
-  defs.innerHTML =
-    `<filter id="ds" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="1.2" stdDeviation="1.6" flood-color="rgba(20,40,80,.30)"/></filter>
-     <radialGradient id="hubg" cx="35%" cy="30%" r="80%"><stop offset="0%" stop-color="${ACCENT}"/><stop offset="100%" stop-color="${ACCENT2}"/></radialGradient>`;
-  svg.appendChild(defs);
+  const wrapW = svg.closest('.map-wrap').clientWidth - 24;
+  const { boxes, width, height } = blockLayout(groups, Math.max(420, wrapW));
+  const M = 12;
+  svg.setAttribute('viewBox', `${-M} ${-M} ${width + M*2} ${height + M*2}`);
 
-  const guides = el('g', {}); radii.forEach(r => guides.appendChild(el('circle',{class:'guide',cx:0,cy:0,r}))); svg.appendChild(guides);
-  const edges = el('g', {}); pos.forEach(p => edges.appendChild(el('line',{class:'edge',x1:0,y1:0,x2:p.x,y2:p.y,opacity:.3}))); svg.appendChild(edges);
+  // рамки групп
+  const gBoxes = el('g', {});
+  boxes.forEach(b => {
+    gBoxes.appendChild(el('rect', {class:'gbox', x:b.x, y:b.y, width:b.w, height:b.h, rx:6}));
+    const t = el('text', {class:'gtitle', x:b.x + BOX_PAD, y:b.y + 15});
+    t.textContent = b.title + ' · ' + b.pos.length;
+    gBoxes.appendChild(t);
+  });
+  svg.appendChild(gBoxes);
 
-  nodes.forEach((n,i)=>{
-    const p = pos[i];
-    const t = TYPE[n.type] || TYPE.other;
-    let nr = (nodes.length>60 ? Math.max(5, t.s-2) : t.s) + (n.critical ? 3 : 0);
-    const color = STC[n.status] || STC.unknown;
+  // рёбра — только объявленные связи, у которых видны оба конца
+  const at = new Map();
+  boxes.forEach(b => b.pos.forEach(p => at.set(p.node.id, p)));
+  const gEdges = el('g', {});
+  allLinks.forEach(l => {
+    const a = at.get(l.from), b = at.get(l.to);
+    if (!a || !b) return;
+    const ln = el('line', {class:'edge', x1:a.x, y1:a.y, x2:b.x, y2:b.y});
+    ln.dataset.a = l.from; ln.dataset.b = l.to;
+    gEdges.appendChild(ln);
+  });
+  svg.appendChild(gEdges);
+
+  // узлы
+  boxes.forEach(b => b.pos.forEach(p => {
+    const n = p.node, t = TYPE[n.type] || TYPE.other;
     const g = el('g', {});
-    g.appendChild(el('circle',{class:'halo',cx:p.x,cy:p.y,r:nr+3,filter:'url(#ds)'}));
-    const c = el('circle',{class:'node',cx:p.x,cy:p.y,r:nr,fill:color,stroke: n.critical ? ACCENT : '#fff','stroke-width': n.critical?2.5:2});
+    const c = el('circle', {class:'node', cx:p.x, cy:p.y, r:9,
+      fill: STC[n.status] || STC.unknown,
+      stroke: n.critical ? 'var(--accent)' : 'var(--surface)', 'stroke-width': n.critical ? 2.5 : 2});
     c.dataset.key = nodeKey(n);
     g.appendChild(c);
-    if (showLabels) {
-      const lt = el('text',{x:p.x,y:p.y+nr+13,'text-anchor':'middle','font-size':11});
-      lt.textContent = trunc(n.hostname || n.ip, 14);
-      g.appendChild(lt);
-    }
-    c.addEventListener('mouseenter', ()=>{ c.setAttribute('r', nr+3); showTip(n); });
+    const ic = el('use', {href:'#i-'+t.i, x:p.x-6, y:p.y+13, width:12, height:12, class:'ntype'});
+    g.appendChild(ic);
+    const lt = el('text', {class:'nlabel', x:p.x, y:p.y+36, 'text-anchor':'middle'});
+    lt.textContent = trunc(n.hostname || n.ip, 13);
+    g.appendChild(lt);
+    c.addEventListener('mouseenter', ()=>{ c.setAttribute('r', 12); highlightLinks(n.id); showTip(n); });
     c.addEventListener('mousemove', e=>moveTip(e));
-    c.addEventListener('mouseleave', ()=>{ c.setAttribute('r', nr); tip.style.display='none'; });
-    c.addEventListener('click', ()=>{ location.href='/devices'; });
+    c.addEventListener('mouseleave', ()=>{ c.setAttribute('r', 9); highlightLinks(null); tip.style.display='none'; });
+    c.addEventListener('click', ()=>{ if (n.id) location.href = '/devices/' + n.id; });
     svg.appendChild(g);
-  });
-
-  const hub = el('g', {});
-  hub.appendChild(el('circle',{cx:0,cy:0,r:32,fill:'url(#hubg)',filter:'url(#ds)'}));
-  const ht = el('use', {href:'#i-map', x:-11, y:-11, width:22, height:22,
-    fill:'none', stroke:'#fff', 'stroke-width':1.6}); hub.appendChild(ht);
-  const gw = el('text',{x:0,y:52,'text-anchor':'middle','font-size':13,'font-weight':700,fill:TEXT}); gw.textContent=gateway; hub.appendChild(gw);
-  svg.appendChild(hub);
+  }));
 
   applySearch();
+}
+
+// highlightLinks выделяет рёбра, которыми узел связан с другими.
+function highlightLinks(id){
+  document.querySelectorAll('#netmap .edge').forEach(e=>{
+    e.classList.toggle('hot', id != null && (e.dataset.a == id || e.dataset.b == id));
+  });
+}
+
+// linkInfo — строки подсказки о связях узла: вверх (куда подключён) и вниз.
+function linkInfo(n){
+  const byId = new Map(allNodes.map(x=>[x.id, x]));
+  const name = id => { const x = byId.get(id); return x ? esc(x.hostname || x.ip || '—') : '—'; };
+  const out = [];
+  allLinks.filter(l=>l.to===n.id).forEach(l=>{
+    out.push('подключено к ' + name(l.from) + (l.port ? ', порт ' + esc(l.port) : ''));
+  });
+  const kids = allLinks.filter(l=>l.from===n.id);
+  if (kids.length) out.push('к нему подключено: ' + kids.length);
+  return out.length ? '<br>' + out.join('<br>') : '';
 }
 
 function showTip(n){
@@ -191,7 +246,7 @@ function showTip(n){
   tip.innerHTML =
     `<b>${tico(n.type)} ${esc(n.hostname||'—')}</b>${n.critical?' ★':''}<br>${esc(n.ip||'IP —')}` +
     (n.mac?`<br>MAC: ${esc(n.mac)}`:'') + (n.vendor?`<br>${esc(n.vendor)}`:'') +
-    `<br>тип: ${t.l}` +
+    `<br>тип: ${t.l}` + linkInfo(n) +
     `<br>статус: <span class="st" style="background:${STC[n.status]}22;color:${STC[n.status]}">${STL[n.status]}</span>` +
     (n.last_seen?`<br>онлайн: ${esc(n.last_seen)}`:'');
   tip.style.display='block';
@@ -207,7 +262,8 @@ function applySearch(){
   const q = (document.getElementById('map-search').value||'').trim().toLowerCase();
   document.querySelectorAll('#netmap .node').forEach(c=>{
     const match = !q || (c.dataset.key||'').includes(q);
-    c.style.opacity = match ? 1 : 0.1;
+    // гасим весь узел целиком: кружок, значок типа и подпись
+    c.parentNode.style.opacity = match ? 1 : 0.12;
   });
 }
 
@@ -256,7 +312,7 @@ function buildPanel(){
 
 async function load(){
   let data; try { data = await (await fetch('/api/network-map')).json(); } catch(e){ return; }
-  allNodes = data.nodes || []; gateway = data.gateway || 'Сеть';
+  allNodes = data.nodes || []; allLinks = data.links || [];
   buildChips(); buildPanel(); render();
 }
 document.getElementById('map-search').addEventListener('input', applySearch);
