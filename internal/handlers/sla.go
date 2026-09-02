@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"netadmin/internal/auth"
@@ -20,6 +21,10 @@ type slaPageData struct {
 	Period      string
 	PeriodLabel string
 	AvgUptime   float64
+	// HasData — была ли хоть одна проверка за период. Без этого признака
+	// шаблон печатал «0.00%» при полном отсутствии истории, и пустая
+	// страница читалась как «всё лежит».
+	HasData bool
 }
 
 // SLAPage — GET /sla?period=week|month : доступность сервисов за период.
@@ -60,9 +65,13 @@ func (a *App) SLAPage(w http.ResponseWriter, r *http.Request) {
 			sr.Rating = slaRating(sr.Uptime, total)
 			data.Rows = append(data.Rows, sr)
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("SLAPage: %v", err)
+		}
 	}
 	if cnt > 0 {
 		data.AvgUptime = sum / float64(cnt)
+		data.HasData = true
 	}
 	web.RenderPage(w, "sla", data)
 }

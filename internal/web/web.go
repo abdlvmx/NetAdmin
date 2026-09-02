@@ -8,14 +8,43 @@ package web
 import (
 	"embed"
 	"html/template"
+	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"netadmin/internal/tz"
 )
 
 //go:embed templates
 var fsys embed.FS
+
+//go:embed static
+var staticFS embed.FS
+
+// StaticFile возвращает содержимое встроенного файла статики. Нужен тестам:
+// иначе вынесенный из шаблона скрипт нечем проверить.
+func StaticFile(name string) ([]byte, error) {
+	return staticFS.ReadFile("static/" + name)
+}
+
+// Static отдаёт встроенные скрипты. Вынесены из HTML, чтобы политика
+// безопасности могла запретить исполняемый код внутри страницы: без этого
+// в script-src приходится держать unsafe-inline, который снимает основную
+// защиту от внедрения скриптов.
+func Static() http.Handler {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic("web: встроенная статика недоступна: " + err.Error())
+	}
+	srv := http.FileServer(http.FS(sub))
+	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// файлы меняются только вместе с бинарником, но пусть браузер сверяется
+		w.Header().Set("Cache-Control", "no-cache")
+		srv.ServeHTTP(w, r)
+	}))
+}
 
 var funcMap = template.FuncMap{
 	"upper":       strings.ToUpper,
@@ -26,6 +55,18 @@ var funcMap = template.FuncMap{
 	"statusBadge": statusBadge,
 	"prioRu":      prioRu,
 	"prioBadge":   prioBadge,
+	"sizeMB":      sizeMB,
+	"dateTime":    dateTime,
+}
+
+// sizeMB — размер файла в мегабайтах для таблиц.
+func sizeMB(b int64) string {
+	return strconv.FormatFloat(float64(b)/(1<<20), 'f', 1, 64) + " МБ"
+}
+
+// dateTime — момент времени в московской зоне, как и остальные даты.
+func dateTime(t time.Time) string {
+	return t.In(tz.Loc).Format("02.01.2006 15:04")
 }
 
 // statusRu/statusBadge/prioRu/prioBadge — подписи и классы бейджей для заявок helpdesk.
@@ -75,21 +116,23 @@ func prioBadge(p string) string {
 	return "badge-gray"
 }
 
-// actionIcon — эмодзи-иконка для записи журнала по типу действия.
+// actionIcon — идентификатор значка в спрайте (layout.html) для записи журнала.
+// Возвращается имя символа, а не эмодзи: набор значков общий для всего
+// интерфейса и не зависит от того, как система рисует эмодзи.
 func actionIcon(action string) string {
 	switch {
 	case strings.Contains(action, "login"), strings.Contains(action, "logout"):
-		return "👤"
+		return "key"
 	case strings.Contains(action, "device"):
-		return "💻"
+		return "devices"
 	case strings.Contains(action, "scan"):
-		return "📡"
+		return "search"
 	case strings.Contains(action, "employee"), strings.Contains(action, "department"):
-		return "🪪"
+		return "people"
 	case strings.Contains(action, "user"):
-		return "👥"
+		return "shield"
 	default:
-		return "⚙"
+		return "settings"
 	}
 }
 

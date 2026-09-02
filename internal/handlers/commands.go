@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,6 +78,9 @@ func (a *App) CommandsPage(w http.ResponseWriter, r *http.Request) {
 				data.Devices = append(data.Devices, o)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("CommandsPage: %v", err)
+		}
 		rows.Close()
 	}
 
@@ -91,6 +95,9 @@ func (a *App) CommandsPage(w http.ResponseWriter, r *http.Request) {
 				row.Created = tz.DateTime(created)
 				data.Recent = append(data.Recent, row)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("CommandsPage: %v", err)
 		}
 		rows.Close()
 	}
@@ -113,14 +120,7 @@ func (a *App) RunCommand(w http.ResponseWriter, r *http.Request) {
 	// цели: либо все ПК с агентом, либо отмеченные
 	var targets []int64
 	if r.FormValue("all") != "" {
-		rows, _ := a.DB.Query(`SELECT id FROM devices WHERE COALESCE(agent_token,'')<>''`)
-		for rows.Next() {
-			var id int64
-			if rows.Scan(&id) == nil {
-				targets = append(targets, id)
-			}
-		}
-		rows.Close()
+		targets = a.agentDeviceIDs()
 	} else {
 		for _, s := range r.Form["device"] {
 			if id, err := strconv.ParseInt(s, 10, 64); err == nil {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,9 @@ func (a *App) RunDueChecks() {
 				due = append(due, c)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("RunDueChecks: %v", err)
+		}
 		rows.Close()
 	}
 	for _, c := range due {
@@ -52,9 +56,9 @@ func (a *App) RunDueChecks() {
 		// уведомление о переходе up<->down
 		if c.prevS != "" && c.prevS != status {
 			if status == "down" {
-				notify.Message("⚠️ Сервис недоступен: " + c.name + " (" + c.target + ")")
+				notify.Message("Сервис недоступен: " + c.name + " (" + c.target + ")")
 			} else {
-				notify.Message("✅ Сервис восстановлен: " + c.name + " (" + c.target + ")")
+				notify.Message("Сервис восстановлен: " + c.name + " (" + c.target + ")")
 			}
 		}
 	}
@@ -106,6 +110,9 @@ func (a *App) ServiceMonitorPage(w http.ResponseWriter, r *http.Request) {
 			}
 			data.Total++
 			data.Rows = append(data.Rows, c)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("ServiceMonitorPage: %v", err)
 		}
 	}
 	web.RenderPage(w, "servicemon", data)

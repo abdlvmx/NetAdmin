@@ -14,7 +14,7 @@
     <h1>Аудит запрещённого ПО</h1>
     <div class="sub">Поиск нежелательных программ (игры, торренты, майнеры) по инвентарю · только учёт, без блокировки</div>
   </div>
-  <div class="datechip">📅 {{today}}</div>
+  <div class="datechip"><svg class="ico ico-sm"><use href="#i-calendar"/></svg> {{today}}</div>
 </div>
 
 <div class="content">
@@ -27,7 +27,7 @@
   </div>
 
   <div class="card" style="margin-bottom:18px">
-    <div class="card-header"><span class="card-title">⚠️ Найдено на компьютерах</span></div>
+    <div class="card-header"><span class="card-title"><svg class="ico ico-sm"><use href="#i-warning"/></svg> Найдено на компьютерах</span></div>
     <div class="toolbar">
       <input type="text" id="fb-search" placeholder="Поиск: хост, ПО…" data-filter-target="#fb-find">
     </div>
@@ -73,7 +73,7 @@
               <td><b>{{.Pattern}}</b></td>
               <td>{{.Category}}</td>
               <td class="text-muted">{{if .Note}}{{.Note}}{{else}}—{{end}}</td>
-              <td><form method="post" action="/forbidden/{{.ID}}/delete" onsubmit="return confirm('Удалить правило?')"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
+              <td><form method="post" action="/forbidden/{{.ID}}/delete" data-confirm="Удалить правило?"><button class="btn btn-ghost btn-sm">Удалить</button></form></td>
             </tr>
             {{else}}
             <tr><td colspan="4" class="empty">Список пуст. Нажмите «Добавить типовой набор» или внесите правила вручную.</td></tr>

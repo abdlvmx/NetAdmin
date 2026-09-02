@@ -3,20 +3,30 @@ package handlers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 
 	"netadmin/internal/ingest"
+	"netadmin/internal/netaccess"
+	"netadmin/internal/web"
 )
 
 // App держит общие зависимости хендлеров.
 type App struct {
 	DB     *sql.DB
 	Ingest *ingest.Writer
+	// Allow — подсети, которым разрешён доступ. Нулевое значение означает
+	// «только локальные и частные сети», поэтому пустая конфигурация
+	// не открывает сервер наружу.
+	Allow netaccess.List
 }
 
 // Routes собирает маршруты приложения (с security-обёрткой).
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
+
+	// встроенные скрипты; доступны без сессии — страница входа тоже их грузит
+	mux.Handle("GET /static/", web.Static())
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
@@ -28,7 +38,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /login", a.Login)
 	mux.HandleFunc("GET /setup", a.SetupPage)
 	mux.HandleFunc("POST /setup", a.Setup)
-	mux.HandleFunc("GET /logout", a.Logout)
+	mux.HandleFunc("POST /logout", a.Logout)
 
 	mux.HandleFunc("GET /dashboard", a.Dashboard)
 
@@ -38,6 +48,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /devices/create", a.CreateDevice)
 	mux.HandleFunc("POST /devices/{id}/update", a.UpdateDevice)
 	mux.HandleFunc("POST /devices/{id}/delete", a.DeleteDevice)
+	// одно действие над несколькими устройствами сразу
+	mux.HandleFunc("POST /devices/bulk", a.BulkDevices)
 	mux.HandleFunc("GET /devices/export", a.ExportDevices)
 	mux.HandleFunc("POST /devices/{id}/agent-token/revoke", a.RevokeAgentToken)
 	mux.HandleFunc("POST /devices/{id}/scan-ports", a.ScanPorts)
@@ -53,6 +65,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /packages/upload", a.UploadPackage)
 	mux.HandleFunc("POST /packages/deploy", a.DeployPackage)
 	mux.HandleFunc("POST /packages/{id}/delete", a.DeletePackage)
+	// раскатка новой сборки агента на весь парк
+	mux.HandleFunc("POST /packages/agent-update", a.DeployAgentUpdate)
 
 	// Сотрудники и отделы
 	mux.HandleFunc("GET /employees", a.EmployeesPage)
@@ -77,6 +91,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/notifications/test", a.TestNotification)
 	mux.HandleFunc("POST /settings/scan", a.UpdateScan)
 	mux.HandleFunc("POST /settings/helpdesk", a.UpdateHelpdesk)
+	mux.HandleFunc("POST /settings/backup", a.UpdateBackup)
+	mux.HandleFunc("POST /settings/backup/now", a.BackupNow)
 
 	// Мониторинг сервисов (HTTP/TCP/DNS/…)
 	mux.HandleFunc("GET /monitoring", a.ServiceMonitorPage)
@@ -173,11 +189,33 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /discovery", a.DiscoveryPage)
 	mux.HandleFunc("POST /discovery/{id}/action", a.DiscoveryAction)
 
-	return a.withSecurity(mux)
+	return withRecover(a.withSecurity(mux))
 }
 
-// setSessionCookie ставит httponly cookie сессии на 8 часов (Secure при HTTPS).
-func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+// agentDeviceIDs возвращает id всех устройств с установленным агентом —
+// цели для команд и раздачи ПО «на все ПК».
+func (a *App) agentDeviceIDs() []int64 {
+	rows, err := a.DB.Query(`SELECT id FROM devices WHERE COALESCE(agent_token,'')<>''`)
+	if err != nil {
+		log.Printf("выбор устройств с агентом: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("выбор устройств с агентом: %v", err)
+	}
+	return ids
+}
+
+// setSessionCookie ставит httponly cookie сессии на 8 часов.
+func setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    token,
@@ -185,7 +223,6 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 		HttpOnly: true,
 		MaxAge:   28800,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
 	})
 }
 

@@ -2,35 +2,11 @@ package handlers
 
 import (
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
-
-// postHMAC выполняет подписанный POST агента и возвращает статус и тело ответа.
-func postHMAC(t *testing.T, srv *httptest.Server, path, token string, payload map[string]any) (int, []byte) {
-	t.Helper()
-	payload["timestamp"] = time.Now().UTC().Unix()
-	b, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", srv.URL+path, bytes.NewReader(b))
-	req.Header.Set("X-Agent-Token", token)
-	mac := hmac.New(sha256.New, []byte(token))
-	mac.Write(b)
-	req.Header.Set("X-Agent-Signature", hex.EncodeToString(mac.Sum(nil)))
-	resp, err := srv.Client().Do(req)
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, body
-}
 
 func TestAgentTaskQueueFlow(t *testing.T) {
 	app := newTestApp(t)
@@ -49,7 +25,7 @@ func TestAgentTaskQueueFlow(t *testing.T) {
 	defer srv.Close()
 
 	// первый опрос — задача выдаётся и помечается sent
-	code, body := postHMAC(t, srv, "/api/agent-tasks/poll", tok, map[string]any{"hostname": "WS-5"})
+	code, body := agentPost(t, app, srv, "/api/agent-tasks/poll", tok, map[string]any{"hostname": "WS-5"})
 	if code != 200 {
 		t.Fatalf("poll код %d", code)
 	}
@@ -68,7 +44,7 @@ func TestAgentTaskQueueFlow(t *testing.T) {
 	}
 
 	// повторный опрос — ожидающих задач больше нет
-	_, body2 := postHMAC(t, srv, "/api/agent-tasks/poll", tok, map[string]any{"hostname": "WS-5"})
+	_, body2 := agentPost(t, app, srv, "/api/agent-tasks/poll", tok, map[string]any{"hostname": "WS-5"})
 	var r2 struct {
 		Tasks []json.RawMessage `json:"tasks"`
 	}
@@ -79,7 +55,7 @@ func TestAgentTaskQueueFlow(t *testing.T) {
 
 	// результат от агента
 	taskID := r.Tasks[0].ID
-	postHMAC(t, srv, "/api/agent-tasks/result", tok, map[string]any{
+	agentPost(t, app, srv, "/api/agent-tasks/result", tok, map[string]any{
 		"id": taskID, "status": "done", "result": "запланировано", "exit_code": 0})
 	var status, result string
 	app.DB.QueryRow("SELECT status, COALESCE(result,'') FROM agent_tasks WHERE id=?", taskID).Scan(&status, &result)

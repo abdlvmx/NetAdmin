@@ -3,6 +3,7 @@ package handlers
 import (
 	"crypto/rand"
 	"database/sql"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -117,6 +118,9 @@ func (a *App) TicketsPage(w http.ResponseWriter, r *http.Request) {
 			}
 			data.Rows = append(data.Rows, t)
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("TicketsPage: %v", err)
+		}
 	}
 	web.RenderPage(w, "tickets", data)
 }
@@ -200,6 +204,9 @@ func (a *App) TicketDetailPage(w http.ResponseWriter, r *http.Request) {
 				data.Comments = append(data.Comments, c)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("TicketDetailPage: %v", err)
+		}
 		rows.Close()
 	}
 	// исполнители — активные пользователи системы
@@ -211,6 +218,9 @@ func (a *App) TicketDetailPage(w http.ResponseWriter, r *http.Request) {
 				data.Staff = append(data.Staff, o)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("TicketDetailPage: %v", err)
+		}
 		rows.Close()
 	}
 	// устройства для привязки
@@ -220,6 +230,9 @@ func (a *App) TicketDetailPage(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&o.ID, &o.Name) == nil {
 				data.Devices = append(data.Devices, o)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("TicketDetailPage: %v", err)
 		}
 		rows.Close()
 	}

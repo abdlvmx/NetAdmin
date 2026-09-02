@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"netadmin/internal/auth"
@@ -29,13 +30,15 @@ func (a *App) AuditPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
 		return
 	}
-	rows, _ := a.DB.Query(`
+	var logs []auditRow
+	rows, err := a.DB.Query(`
 		SELECT COALESCE(a.created_at,''), COALESCE(u.username,'система'),
 		       a.action, COALESCE(a.target,''), COALESCE(a.detail,'')
 		FROM audit_log a LEFT JOIN users u ON a.user_id=u.id
 		ORDER BY a.created_at DESC LIMIT 200`)
-	var logs []auditRow
-	if rows != nil {
+	if err != nil {
+		log.Printf("журнал действий: %v", err)
+	} else {
 		defer rows.Close()
 		for rows.Next() {
 			var l auditRow
@@ -43,6 +46,10 @@ func (a *App) AuditPage(w http.ResponseWriter, r *http.Request) {
 				l.CreatedAt = tz.DateTime(l.CreatedAt)
 				logs = append(logs, l)
 			}
+		}
+		// без этой проверки оборванная выборка молча показалась бы неполной
+		if err := rows.Err(); err != nil {
+			log.Printf("журнал действий: %v", err)
 		}
 	}
 	web.RenderPage(w, "audit", auditData{User: user, Active: "audit", Logs: logs})

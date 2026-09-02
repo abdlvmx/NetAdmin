@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"sort"
 
@@ -47,13 +48,22 @@ func (a *App) CapacityPage(w http.ResponseWriter, r *http.Request) {
 				devs = append(devs, d)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("CapacityPage: %v", err)
+		}
 		rows.Close()
 	}
 
+	// Ряды по всем устройствам берём одним запросом. Раньше здесь шло по два
+	// запроса на устройство — на парке в 300 машин это 600 обращений и ~150 мс
+	// только на страницу прогноза.
+	disk, ram := a.allDailySeries()
 	for _, d := range devs {
-		for _, res := range []struct{ col, name string }{{"disk", "Диск"}, {"ram", "ОЗУ"}} {
-			ys := a.dailySeries(d.id, res.col)
-			if days, cur, ok := forecastDays(ys, capacityThreshold); ok {
+		for _, res := range []struct {
+			name   string
+			series map[int64][]float64
+		}{{"Диск", disk}, {"ОЗУ", ram}} {
+			if days, cur, ok := forecastDays(res.series[d.id], capacityThreshold); ok {
 				data.Rows = append(data.Rows, capacityRow{Hostname: d.host, Resource: res.name, Current: cur, Days: days})
 			}
 		}
@@ -63,29 +73,39 @@ func (a *App) CapacityPage(w http.ResponseWriter, r *http.Request) {
 	web.RenderPage(w, "capacity", data)
 }
 
-// dailySeries возвращает суточные средние значения метрики (raw + rollup) по дням.
-func (a *App) dailySeries(deviceID int64, col string) []float64 {
-	rawCol := map[string]string{"disk": "disk_usage", "ram": "ram_usage", "cpu": "cpu_usage"}[col]
-	rollCol := map[string]string{"disk": "disk_avg", "ram": "ram_avg", "cpu": "cpu_avg"}[col]
-	q := `SELECT day, AVG(v) FROM (
-		SELECT date(ts) day, ` + rawCol + ` v FROM metrics_history WHERE device_id=?
-		UNION ALL
-		SELECT date(bucket) day, ` + rollCol + ` v FROM metrics_rollup WHERE device_id=? AND period='day'
-	) GROUP BY day ORDER BY day`
-	rows, err := a.DB.Query(q, deviceID, deviceID)
+// allDailySeries возвращает суточные средние по диску и ОЗУ сразу для всех
+// устройств: map[device_id] -> значения по дням в хронологическом порядке.
+//
+// Отдельный запрос на устройство дёшев сам по себе, дорога их сумма: страница
+// прогноза делала по два на каждое устройство парка — 600 обращений на 300
+// машинах. Один проход с группировкой занимает столько же, сколько несколько
+// десятков таких запросов, и дальше от числа устройств почти не зависит.
+func (a *App) allDailySeries() (disk, ram map[int64][]float64) {
+	disk, ram = map[int64][]float64{}, map[int64][]float64{}
+	rows, err := a.DB.Query(`SELECT device_id, day, AVG(d), AVG(r) FROM (
+			SELECT device_id, date(ts) day, disk_usage d, ram_usage r FROM metrics_history
+			UNION ALL
+			SELECT device_id, date(bucket) day, disk_avg, ram_avg FROM metrics_rollup WHERE period='day'
+		) GROUP BY device_id, day ORDER BY device_id, day`)
 	if err != nil {
-		return nil
+		log.Printf("allDailySeries: %v", err)
+		return disk, ram
 	}
 	defer rows.Close()
-	var out []float64
 	for rows.Next() {
+		var id int64
 		var day string
-		var v float64
-		if rows.Scan(&day, &v) == nil {
-			out = append(out, v)
+		var dv, rv float64
+		if rows.Scan(&id, &day, &dv, &rv) != nil {
+			continue
 		}
+		disk[id] = append(disk[id], dv)
+		ram[id] = append(ram[id], rv)
 	}
-	return out
+	if err := rows.Err(); err != nil {
+		log.Printf("allDailySeries: %v", err)
+	}
+	return disk, ram
 }
 
 // forecastDays оценивает, через сколько дней значение достигнет порога (линейная

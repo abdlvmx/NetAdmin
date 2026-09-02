@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -10,11 +11,7 @@ import (
 
 // AgentSoftware — POST /api/agent-software : инвентарь ПО хоста (токен+HMAC+timestamp).
 func (a *App) AgentSoftware(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := a.resolveAgent(r); !ok {
-		http.Error(w, "invalid agent token", http.StatusUnauthorized)
-		return
-	}
-	body, ok := a.verifyAgentRequest(w, r)
+	ag, ok := a.authAgentPost(w, r)
 	if !ok {
 		return
 	}
@@ -26,14 +23,16 @@ func (a *App) AgentSoftware(w http.ResponseWriter, r *http.Request) {
 			InstallDate string `json:"install_date"`
 		} `json:"software"`
 	}
-	if err := json.Unmarshal(body, &p); err != nil {
+	if err := json.Unmarshal(ag.Body, &p); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
 
-	var did int64
-	if a.DB.QueryRow("SELECT id FROM devices WHERE hostname=?", p.Hostname).Scan(&did) != nil || did == 0 {
-		writeJSON(w, map[string]any{"ok": true, "skipped": "unknown host"})
+	// устройство определяется подписью запроса, а не полем в теле: иначе агент
+	// одной машины мог бы переписать инвентарь другой, назвавшись её именем
+	did := ag.DeviceID
+	if did == 0 {
+		writeAgentJSON(w, ag.Key, map[string]any{"ok": true, "skipped": "not enrolled"})
 		return
 	}
 
@@ -47,6 +46,9 @@ func (a *App) AgentSoftware(w http.ResponseWriter, r *http.Request) {
 				prev[n] = true
 				had = true
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("AgentSoftware: %v", err)
 		}
 		rows.Close()
 	}
@@ -86,7 +88,7 @@ func (a *App) AgentSoftware(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, map[string]any{"ok": true, "count": len(p.Software)})
+	writeAgentJSON(w, ag.Key, map[string]any{"ok": true, "count": len(p.Software)})
 }
 
 // DeviceSoftware — GET /api/devices/{id}/software : список ПО устройства.
@@ -111,6 +113,9 @@ func (a *App) DeviceSoftware(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&it.Name, &it.Version, &it.InstallDate) == nil {
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceSoftware: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"software": items})

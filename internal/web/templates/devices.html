@@ -2,15 +2,22 @@
 
 {{define "extra_head"}}
 <style>
-  .device-name { font-weight: 600; }
+  /* Панель групповых действий появляется, только когда что-то выбрано. */
+  .bulk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border-2);
+    border-radius: var(--radius-sm); background: var(--surface-2); }
+  .bulk-bar[hidden] { display: none; }
+  .bulk-bar select, .bulk-bar input { width: auto; min-width: 170px; }
+  .bulk-count { font-size: var(--fs-sm); color: var(--muted); margin-right: 4px; }
+  .device-name { font-weight: 600; white-space: nowrap; }
   .dev-link { color: var(--accent); text-decoration: none; }
   .dev-link:hover { text-decoration: underline; }
-  .device-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  /* Адрес и MAC — одна строка. При переносе ячейка становилась трёхстрочной
+     и тянула вверх всю строку таблицы. */
+  .device-meta { color: var(--muted); font-size: var(--fs-xs); margin-top: 1px; white-space: nowrap; }
   .inv-line { color: var(--muted); font-size: 12px; line-height: 1.5; }
-  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .chart-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin: 10px 0; }
   .chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
-  .chart-canvas { width: 100%; height: 260px; display: block; }
   .range button { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
     padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 7px; margin-left: 4px; }
   .range button.on { background: var(--accent-soft); color: var(--accent-hov); border-color: transparent; }
@@ -62,8 +69,8 @@
   </div>
   {{if .User.CanWrite}}
   <div class="flex gap-2">
-    <button class="btn btn-ghost" id="scan-btn" onclick="scanNetwork()">Сканировать сеть</button>
-    <button class="btn btn-primary" onclick="openModal('modal-add')">+ Добавить</button>
+    <button class="btn btn-ghost" id="scan-btn" data-act="scanNetwork">Сканировать сеть</button>
+    <button class="btn btn-primary" data-modal-open="modal-add">+ Добавить</button>
   </div>
   {{end}}
 </div>
@@ -77,20 +84,56 @@
       <option value="offline">Оффлайн</option>
       <option value="unknown">Неизвестно</option>
     </select>
+    <select data-filter-target="#dev-body" data-col="agent">
+      <option value="all">Агент: любой</option>
+      <option value="yes">Агент установлен</option>
+      <option value="no">Без агента</option>
+    </select>
+    <select data-filter-target="#dev-body" data-col="alert">
+      <option value="all">Все устройства</option>
+      <option value="1">Только с проблемами</option>
+    </select>
     <a href="/devices/export" class="btn btn-ghost">Экспорт CSV</a>
   </div>
   <div class="card">
+    {{if .User.CanWrite}}
+    <form method="post" action="/devices/bulk" id="bulk-form" class="bulk-bar" hidden
+          data-confirm="Применить действие к выбранным устройствам?">
+      <span class="bulk-count"><b id="bulk-n">0</b> выбрано</span>
+      <select name="action" id="bulk-action">
+        <option value="location">Расположение</option>
+        <option value="employee">Владелец</option>
+        <option value="type">Тип устройства</option>
+        <option value="critical">Важность</option>
+        {{if .User.IsAdmin}}<option value="delete">Удалить</option>{{end}}
+      </select>
+      <input type="text" name="value" id="bulk-text" placeholder="напр. каб. 201">
+      <select name="value" id="bulk-employee" hidden>
+        <option value="">— без владельца —</option>
+        {{range .Employees}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      <select name="value" id="bulk-critical" hidden>
+        <option value="1">Критически важное</option>
+        <option value="0">Обычное</option>
+      </select>
+      <button class="btn btn-primary btn-sm" type="submit">Применить</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-act="bulkClear">Снять выбор</button>
+    </form>
+    {{end}}
+
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
+            {{if .User.CanWrite}}<th style="width:28px"><input type="checkbox" id="dev-all" title="Выбрать все видимые" style="width:auto"></th>{{end}}
             <th data-sort title="Сортировка по IP-адресу (по возрастанию / убыванию)">Хост / IP</th><th>Инвентарь</th><th>Владелец</th>
             <th>Расположение</th><th data-sort title="Установлен ли агент на устройстве">Агент</th><th data-sort>Статус</th><th data-sort>Онлайн</th><th></th>
           </tr>
         </thead>
         <tbody id="dev-body">
           {{range .Devices}}
-          <tr id="row-{{.ID}}" data-status="{{.Status}}" data-alert="{{if .Alert}}1{{else}}0{{end}}">
+          <tr id="row-{{.ID}}" data-status="{{.Status}}" data-alert="{{if .Alert}}1{{else}}0{{end}}" data-agent="{{if .HasToken}}yes{{else}}no{{end}}">
+            {{if $.User.CanWrite}}<td><input type="checkbox" class="dev-pick" value="{{.ID}}" style="width:auto"></td>{{end}}
             <td data-sort-val="{{.IP}}">
               <div class="device-name"><a href="/devices/{{.ID}}" class="dev-link">{{.Hostname}}</a>{{if .Critical}} <span class="badge badge-amber" style="font-size:10px" title="критически важное — мониторинг доступности">★</span>{{end}}</div>
               <div class="device-meta">{{if .IP}}{{.IP}}{{else}}—{{end}}{{if .MAC}} · {{.MAC}}{{end}}</div>
@@ -105,8 +148,9 @@
               </div>
               {{end}}
             </td>
-            <td>{{if .EmployeeName}}{{.EmployeeName}}{{else if .OwnerName}}{{.OwnerName}}{{else}}—{{end}}</td>
-            <td class="text-muted">{{if .Location}}{{.Location}}{{else}}—{{end}}</td>
+            {{$owner := ""}}{{if .EmployeeName}}{{$owner = .EmployeeName}}{{else if .OwnerName}}{{$owner = .OwnerName}}{{end}}
+            <td class="cell-tight" title="{{$owner}}">{{if $owner}}{{$owner}}{{else}}—{{end}}</td>
+            <td class="cell-tight text-muted" title="{{.Location}}">{{if .Location}}{{.Location}}{{else}}—{{end}}</td>
             <td data-sort-val="{{if .HasToken}}1{{else}}0{{end}}">
               {{if .HasToken}}<span class="badge badge-green" title="агент установлен и зарегистрирован">✓ агент</span>
               {{else}}<span class="text-muted">—</span>{{end}}
@@ -121,14 +165,14 @@
               <div class="row-actions">
                 <a class="btn btn-ghost btn-sm" href="/devices/{{.ID}}" title="Открыть страницу устройства">Открыть</a>
                 {{if $.User.CanWrite}}
-                {{if .IP}}<button class="btn btn-ghost btn-sm" onclick="pingDevice('{{.IP}}',{{.ID}})">Ping</button>{{end}}
-                {{if .IP}}<button class="btn btn-ghost btn-sm" onclick="scanPorts({{.ID}},this)">Порты</button>{{end}}
+                {{if .IP}}<button class="btn btn-ghost btn-sm" data-act="ping" data-ip="{{.IP}}" data-id="{{.ID}}">Ping</button>{{end}}
+                {{if .IP}}<button class="btn btn-ghost btn-sm" data-act="ports" data-id="{{.ID}}">Порты</button>{{end}}
                 {{end}}
               </div>
             </td>
           </tr>
           {{else}}
-          <tr><td colspan="8" class="empty">Устройств нет. Добавьте вручную или запустите агента.</td></tr>
+          <tr><td colspan="9" class="empty">Устройств нет. Добавьте вручную или запустите агента.</td></tr>
           {{end}}
         </tbody>
       </table>
@@ -136,13 +180,13 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-add" onclick="closeOnOverlay(event,'modal-add')">
+<div class="modal-overlay" id="modal-add" data-modal-overlay="modal-add">
   <div class="modal modal-wide">
     <h3>Добавить устройство</h3>
     <form method="post" action="/devices/create">
       {{template "deviceFields" .Employees}}
       <div class="modal-footer">
-        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add')">Отмена</button>
+        <button type="button" class="btn btn-ghost" data-modal-close="modal-add">Отмена</button>
         <button type="submit" class="btn btn-primary">Добавить</button>
       </div>
     </form>
@@ -152,86 +196,5 @@
 {{end}}
 
 {{define "scripts"}}
-<script>
-function openModal(id){ document.getElementById(id).classList.add('open'); }
-function closeModal(id){ document.getElementById(id).classList.remove('open'); }
-function closeOnOverlay(e,id){ if(e.target===e.currentTarget) closeModal(id); }
-
-async function scanNetwork(){
-  const b = document.getElementById('scan-btn');
-  const old = b.textContent;
-  b.disabled = true; b.textContent = 'Сканирование…';
-  try{
-    const r = await fetch('/api/scan',{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}});
-    const d = await r.json();
-    b.textContent = `Найдено: ${d.found}`;
-    toast(`Сканирование завершено: найдено устройств — ${d.found}`, 'ok');
-    setTimeout(()=>location.reload(), 900);
-  }catch(e){
-    b.textContent = 'Ошибка'; b.disabled = false;
-    toast('Ошибка сканирования сети', 'err');
-    setTimeout(()=>{ b.textContent = old; }, 1500);
-  }
-}
-
-async function pingDevice(ip,id){
-  const el = document.getElementById('status-'+id);
-  el.innerHTML = '<span class="badge badge-amber">пинг…</span>';
-  try{
-    const r = await fetch('/api/ping',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':window.csrfToken},body:JSON.stringify({ip})});
-    const d = await r.json();
-    el.innerHTML = d.status==='online'
-      ? '<span class="badge badge-green">онлайн</span>'
-      : '<span class="badge badge-red">оффлайн</span>';
-  }catch(e){ el.innerHTML = '<span class="badge badge-gray">ошибка</span>'; }
-}
-
-async function scanPorts(id, btn){
-  const old = btn.textContent; btn.disabled = true; btn.textContent = 'Скан…';
-  try{
-    const r = await fetch(`/devices/${id}/scan-ports`,{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}});
-    const d = await r.json();
-    if(d.ok){ toast('Открытые порты: ' + (d.ports && d.ports.length ? d.ports.join(', ') : 'нет'), 'ok'); setTimeout(()=>location.reload(), 900); }
-    else { toast(d.error || 'Ошибка', 'err'); btn.disabled=false; btn.textContent=old; }
-  }catch(e){ toast('Ошибка сканирования портов', 'err'); btn.disabled=false; btn.textContent=old; }
-}
-
-// ── авто-обновление статусов устройств (без перезагрузки) ──
-function statusBadge(s){
-  if(s==='online')  return '<span class="badge badge-green">онлайн</span>';
-  if(s==='offline') return '<span class="badge badge-red">оффлайн</span>';
-  return '<span class="badge badge-gray">неизвестно</span>';
-}
-async function refreshStatuses(){
-  if(document.hidden) return; // не дёргаем сервер, если вкладка не активна
-  try{
-    const d = await (await fetch('/api/devices/status')).json();
-    (d.devices||[]).forEach(dev=>{
-      const st = document.getElementById('status-'+dev.id);
-      if(st) st.innerHTML = statusBadge(dev.status);
-      const sn = document.getElementById('seen-'+dev.id);
-      if(sn) sn.textContent = dev.last_seen || '—';
-      const row = document.getElementById('row-'+dev.id);
-      if(row) row.dataset.status = dev.status;
-    });
-  }catch(e){}
-}
-setInterval(refreshStatuses, 20000);
-
-// ── применить фильтр из URL (клики с дашборда: ?status=offline, ?alerts=1) ──
-window.addEventListener('DOMContentLoaded', ()=>{
-  const p = new URLSearchParams(location.search);
-  const status = p.get('status');
-  if(status){
-    const sel = document.querySelector('select[data-col="status"]');
-    if(sel){ sel.value = status; sel.dispatchEvent(new Event('change')); }
-  }
-  if(p.get('alerts')==='1'){
-    document.querySelectorAll('#dev-body tr').forEach(tr=>{
-      if(tr.querySelector('td')) tr.style.display = (tr.dataset.alert==='1') ? '' : 'none';
-    });
-    toast('Показаны устройства с предупреждениями (оффлайн / перегруз / нет связи)', '');
-  }
-});
-</script>
+<script src="/static/devices.js" defer></script>
 {{end}}

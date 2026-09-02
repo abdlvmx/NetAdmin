@@ -69,10 +69,25 @@ func collectDisks() []map[string]any {
 			"power_on_hours": d.POH,
 			"wear_pct":       d.Wear,
 			"read_errors":    d.ReadErr,
-			"predict_fail":   d.Health != "" && d.Health != "Healthy",
+			"predict_fail":   smartPredictsFail(d.Health),
 		})
 	}
 	return disks
+}
+
+// smartPredictsFail — SMART предсказывает отказ только при явно неисправном
+// состоянии. «Warning» означает деградацию, а не отказ.
+//
+// Раньше отказом считалось всё, кроме «Healthy». Из-за этого диск в состоянии
+// Warning приезжал на сервер как предсказанный отказ: поднимался критический
+// инцидент и уходило письмо, а ветка Warning в оценке на сервере становилась
+// недостижимой. Регистр не учитываем — значение приходит строкой от PowerShell.
+func smartPredictsFail(health string) bool {
+	switch strings.ToLower(strings.TrimSpace(health)) {
+	case "unhealthy", "failed", "fail":
+		return true
+	}
+	return false
 }
 
 // normalizeMedia приводит MediaType от Get-PhysicalDisk к читаемому виду.

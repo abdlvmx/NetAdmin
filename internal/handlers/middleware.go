@@ -1,14 +1,38 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 )
 
 const csrfCookie = "csrf"
+
+// withRecover перехватывает панику в обработчике. Без него net/http гасит
+// панику молча, обрывая соединение: пользователь видит пустую страницу,
+// а в журнале не остаётся ни строчки — искать такой сбой потом нечем.
+func withRecover(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			// служебный сигнал net/http для намеренного обрыва — пропускаем дальше
+			if v == http.ErrAbortHandler {
+				panic(v)
+			}
+			log.Printf("паника при обработке %s %s: %v\n%s", r.Method, r.URL.Path, v, debug.Stack())
+			http.Error(w, "внутренняя ошибка сервера", http.StatusInternalServerError)
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
 
 func randToken() string {
 	b := make([]byte, 32)
@@ -21,38 +45,66 @@ func securityHeaders(w http.ResponseWriter) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "same-origin")
-	// всё своё (go:embed), внешних ресурсов нет; inline нужен для наших стилей/скриптов
+	// Всё своё (go:embed), внешних ресурсов нет.
+	//
+	// script-src без unsafe-inline: скрипты вынесены в /static, обработчики
+	// в атрибутах заменены делегированием по data-атрибутам. Это главная часть
+	// защиты — внедрённая разметка не сможет выполнить код.
+	//
+	// style-src оставляет unsafe-inline осознанно: в шаблонах больше двухсот
+	// атрибутов style=", которые эта директива запрещает наравне с блоками
+	// <style>. Переверстать их — работа несопоставимая с выигрышем: подмена
+	// оформления не даёт выполнения кода, а вывод и без того экранируется.
 	h.Set("Content-Security-Policy",
 		"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "+
-			"script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'")
+			"script-src 'self'; connect-src 'self'; frame-ancestors 'none'; "+
+			"base-uri 'none'; form-action 'self'; object-src 'none'")
 }
 
 // ensureCSRF возвращает CSRF-токен из cookie, создавая его при отсутствии.
-func ensureCSRF(w http.ResponseWriter, r *http.Request, secure bool) string {
+func ensureCSRF(w http.ResponseWriter, r *http.Request) string {
 	if c, err := r.Cookie(csrfCookie); err == nil && c.Value != "" {
 		return c.Value
 	}
 	tok := randToken()
 	http.SetCookie(w, &http.Cookie{
 		Name: csrfCookie, Value: tok, Path: "/",
-		SameSite: http.SameSiteLaxMode, Secure: secure,
+		SameSite: http.SameSiteLaxMode,
 	})
 	return tok
 }
 
-// csrfExempt — пути без CSRF-проверки: приём от агента (авторизация токеном,
-// без cookie) и вход/первичная настройка (сессии ещё нет).
+// csrfExempt — пути без CSRF-проверки. Остались только эндпоинты агента: он
+// авторизуется подписью, а не cookie, и CSRF к нему неприменим. Вход и
+// первичная настройка проверяются наравне с остальными формами — иначе с
+// чужого сайта можно было бы залогинить пользователя в подставную учётку.
 func csrfExempt(path string) bool {
-	return strings.HasPrefix(path, "/api/agent-") || path == "/login" || path == "/setup"
+	return strings.HasPrefix(path, "/api/agent-")
 }
 
-// Secure определяется по факту TLS-соединения.
-func (a *App) secure(r *http.Request) bool { return r.TLS != nil }
+// csrfCtxKey — ключ, под которым CSRF-токен кладётся в контекст запроса.
+type csrfCtxKey struct{}
 
-// withSecurity оборачивает роутер: security-заголовки + CSRF (double-submit).
+// csrfToken достаёт токен, положенный middleware. Читать его из cookie самим
+// нельзя: на первом визите cookie ещё только уходит в ответе, а в запросе её нет.
+func csrfToken(r *http.Request) string {
+	v, _ := r.Context().Value(csrfCtxKey{}).(string)
+	return v
+}
+
+// withSecurity оборачивает роутер: ограничение по подсетям, security-заголовки
+// и CSRF (double-submit).
 func (a *App) withSecurity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		securityHeaders(w)
+
+		// Канал не шифруется, поэтому доступ ограничен разрешёнными подсетями.
+		// Проверка идёт до всего остального: обращение из чужой сети не должно
+		// доходить ни до аутентификации, ни до публичного портала заявок.
+		if !a.Allow.Allows(clientIP(r)) {
+			http.Error(w, "доступ из этой сети запрещён", http.StatusForbidden)
+			return
+		}
 
 		// ограничение размера тела запроса (анти-DoS)
 		bodyLimit := int64(1 << 20) // 1 МБ по умолчанию
@@ -67,7 +119,10 @@ func (a *App) withSecurity(next http.Handler) http.Handler {
 			return
 		}
 
-		cookieTok := ensureCSRF(w, r, a.secure(r))
+		cookieTok := ensureCSRF(w, r)
+		// страницы входа и настройки идут без общего layout, поэтому токен
+		// передаётся им через контекст, а не подставляется скриптом
+		r = r.WithContext(context.WithValue(r.Context(), csrfCtxKey{}, cookieTok))
 
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:

@@ -44,7 +44,7 @@ func TestAgentDisksSnapshotAndAlert(t *testing.T) {
 	}
 
 	// первый снимок: один исправный, один с предсказанным отказом
-	postJSON(t, srv, "/api/agent-disks", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-disks", tok, map[string]any{
 		"hostname": "WS-9", "disks": []map[string]any{
 			disk("Good SSD", "S-OK", "Healthy", 10, false),
 			disk("Dying SSD", "S-BAD", "Healthy", 10, true)}})
@@ -57,7 +57,7 @@ func TestAgentDisksSnapshotAndAlert(t *testing.T) {
 	}
 
 	// второй снимок: тот же отказавший диск всё ещё критичен — нового алерта быть НЕ должно
-	postJSON(t, srv, "/api/agent-disks", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-disks", tok, map[string]any{
 		"hostname": "WS-9", "disks": []map[string]any{
 			disk("Good SSD", "S-OK", "Healthy", 10, false),
 			disk("Dying SSD", "S-BAD", "Healthy", 10, true)}})
@@ -66,7 +66,7 @@ func TestAgentDisksSnapshotAndAlert(t *testing.T) {
 	}
 
 	// третий снимок: добавился ещё один отказавший диск — ровно 1 новый алерт
-	postJSON(t, srv, "/api/agent-disks", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-disks", tok, map[string]any{
 		"hostname": "WS-9", "disks": []map[string]any{
 			disk("Good SSD", "S-OK", "Healthy", 10, false),
 			disk("Dying SSD", "S-BAD", "Healthy", 10, true),
@@ -76,5 +76,23 @@ func TestAgentDisksSnapshotAndAlert(t *testing.T) {
 	}
 	if n := countRows(app, "SELECT COUNT(*) FROM disks WHERE device_id=(SELECT id FROM devices WHERE hostname='WS-9')"); n != 3 {
 		t.Fatalf("после snapshot3 ожидалось 3 диска (полная замена), получено %d", n)
+	}
+}
+
+// Состояние диска приходит строкой от PowerShell — регистр не должен влиять
+// на оценку.
+func TestAssessDiskHealthCaseInsensitive(t *testing.T) {
+	for _, h := range []string{"Unhealthy", "unhealthy", " UNHEALTHY "} {
+		if got := assessDisk(diskInfo{Health: h}); got.Severity != "critical" {
+			t.Errorf("%q должно быть critical, получено %q", h, got.Severity)
+		}
+	}
+	for _, h := range []string{"Warning", "warning"} {
+		if got := assessDisk(diskInfo{Health: h}); got.Severity != "warning" {
+			t.Errorf("%q должно быть warning, получено %q", h, got.Severity)
+		}
+	}
+	if got := assessDisk(diskInfo{Health: "Healthy", WearPct: 10, Temperature: 35}); got.Severity != "" {
+		t.Errorf("исправный диск не должен давать замечаний, получено %q", got.Severity)
 	}
 }

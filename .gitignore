@@ -6,8 +6,6 @@
 *.db-shm
 *.db-wal
 config.json
-cert.pem
-key.pem
 agent_state.json
 *.log 
 *.pid

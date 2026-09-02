@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"html/template"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,11 +30,16 @@ type deptRow struct {
 }
 
 type employeesData struct {
-	User          *auth.User
-	Active        string
-	Employees     []empRow
-	Departments   []deptRow
-	EmployeesJSON template.JS
+	User        *auth.User
+	Active      string
+	Employees   []empRow
+	Departments []deptRow
+	// EmployeesJSON — справочник для формы редактирования. Обычная строка:
+	// значение уезжает в data-атрибут и разбирается через JSON.parse, а не
+	// вставляется в тело скрипта. Прежний template.JS отключал экранирование
+	// и держался на том, что json.Marshal сам экранирует «<» — незаметное
+	// изменение сериализации открыло бы внедрение скрипта.
+	EmployeesJSON string
 }
 
 // EmployeesPage — GET /employees.
@@ -51,7 +56,7 @@ func (a *App) EmployeesPage(w http.ResponseWriter, r *http.Request) {
 		Active:        "employees",
 		Employees:     emps,
 		Departments:   a.listDepartments(),
-		EmployeesJSON: template.JS(raw),
+		EmployeesJSON: string(raw),
 	})
 }
 
@@ -77,6 +82,9 @@ func (a *App) listEmployeesFull() []empRow {
 			out = append(out, e)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("listEmployeesFull: %v", err)
+	}
 	return out
 }
 
@@ -92,6 +100,9 @@ func (a *App) listDepartments() []deptRow {
 		if rows.Scan(&d.ID, &d.Name) == nil {
 			out = append(out, d)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("listDepartments: %v", err)
 	}
 	return out
 }

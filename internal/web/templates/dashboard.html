@@ -5,13 +5,13 @@
   .stats-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   .stat-card { display: flex; flex-direction: column; gap: 10px; }
   .stat-top { display: flex; align-items: center; gap: 10px; }
-  .stat-ic { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center;
-    justify-content: center; font-size: 18px; flex-shrink: 0; }
-  .ic-blue { background: var(--accent-soft); } .ic-amber { background: var(--amber-soft); }
-  .ic-red { background: var(--red-soft); } .ic-green { background: var(--green-soft); }
-  .ic-violet { background: var(--violet-soft); }
+  /* Значок сводки — нейтральная плашка с контуром: цветные подложки под
+     каждым показателем давали четыре разных пятна в одном ряду. */
+  .stat-ic { width: 30px; height: 30px; border-radius: var(--radius-sm); display: flex;
+    align-items: center; justify-content: center; flex-shrink: 0;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
   .stat-top .stat-label { margin: 0; flex: 1; }
-  .stat-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+  .stat-badge { font-size: var(--fs-xs); font-weight: 500; padding: 1px 7px; border-radius: var(--radius-xs); }
   .stat-badge.green { background: var(--green-soft); color: var(--green); }
   .stat-value { font-size: 26px; font-weight: 750; letter-spacing: -0.5px; }
   .stat-value.sm { font-size: 19px; }
@@ -26,6 +26,19 @@
   .score-good { color: var(--green); } .score-medium { color: #d97706; } .score-poor { color: var(--red); }
   .bar-good { background: var(--green); } .bar-medium { background: #d97706; } .bar-poor { background: var(--red); }
 
+  /* Сводка проблем: одна строка на источник, число справа, вся строка — ссылка
+     в свой раздел. Красная точка — то, что уже сломано, янтарная — то, что
+     сломается, если не вмешаться. */
+  .issues { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 8px; }
+  .issue { display: flex; align-items: center; gap: 10px; padding: 10px 12px; text-decoration: none;
+    color: inherit; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--surface); transition: border-color .12s; }
+  .issue:hover { border-color: var(--accent); }
+  .issue-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--amber); }
+  .issue-dot.crit { background: var(--red); }
+  .issue-label { flex: 1; font-size: 13px; }
+  .issue-num { font-weight: 700; font-variant-numeric: tabular-nums; }
+
   .dash-row { display: grid; grid-template-columns: 1.7fr 1fr 1fr; gap: 16px; }
   .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
   .tabs button { border: none; background: transparent; color: var(--muted); font-size: 13px;
@@ -34,7 +47,6 @@
   .range button { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
     padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 7px; margin-left: 4px; }
   .range button.on { background: var(--accent); color: #fff; border-color: transparent; }
-  .chart-canvas { width: 100%; height: 250px; display: block; }
 
   .donut-wrap { display: flex; flex-direction: column; align-items: center; gap: 16px; }
   .legend { width: 100%; display: flex; flex-direction: column; gap: 9px; }
@@ -74,35 +86,50 @@
     <h1>Дашборд</h1>
     <div class="sub">Обзор сети и безопасности</div>
   </div>
-  <div class="datechip">📅 {{today}}</div>
+  <div class="datechip"><svg class="ico ico-sm"><use href="#i-calendar"/></svg> {{today}}</div>
 </div>
 
 <div class="content">
   <div class="stats-grid">
     <a href="/devices?status=online" class="stat-card" title="Показать устройства онлайн">
-      <div class="stat-top"><div class="stat-ic ic-blue">💻</div><div class="stat-label">Устройства онлайн</div>
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-devices"/></svg></div><div class="stat-label">Устройства онлайн</div>
         {{if .Stats.DevicesTotal}}<span class="stat-badge green" id="d-onpct">{{.Stats.DevicesOnlinePct}}%</span>{{end}}</div>
       <div class="stat-value"><span id="d-online">{{.Stats.DevicesOnline}}</span> <span class="stat-of">/ <span id="d-total">{{.Stats.DevicesTotal}}</span></span></div>
       <div class="stat-sub"><span id="d-offline">{{.Stats.DevicesOffline}}</span> оффлайн</div>
     </a>
     <a href="/devices?alerts=1" class="stat-card" title="Показать проблемные устройства">
-      <div class="stat-top"><div class="stat-ic ic-amber">⚠️</div><div class="stat-label">Предупреждения</div></div>
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-warning"/></svg></div><div class="stat-label">Предупреждения</div></div>
       <div class="stat-value {{if .Stats.AlertsTotal}}text-red{{end}}" id="d-alerts">{{.Stats.AlertsTotal}}</div>
       <div class="stat-sub">offline, ресурс или heartbeat</div>
     </a>
     <div class="stat-card">
-      <div class="stat-top"><div class="stat-ic ic-green">👥</div><div class="stat-label">Пользователи</div></div>
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-people"/></svg></div><div class="stat-label">Пользователи</div></div>
       <div class="stat-value">{{.Stats.UsersTotal}}</div>
       <div class="stat-sub">{{.Stats.UsersActive}} активных</div>
     </div>
     <div class="stat-card">
-      <div class="stat-top"><div class="stat-ic ic-violet">💓</div><div class="stat-label">Последний heartbeat</div></div>
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-pulse"/></svg></div><div class="stat-label">Последний heartbeat</div></div>
       <div class="stat-value sm">{{.LastHeartbeat}}</div>
       <div class="stat-sub">обновление от агентов</div>
     </div>
   </div>
 
-  <div class="dash-row">
+  <div class="card" style="margin-top:16px">
+    <div class="card-header"><span class="card-title">Требует внимания</span></div>
+    {{if .Issues}}
+    <div class="issues">
+      {{range .Issues}}
+      <a class="issue" href="{{.Href}}">
+        <span class="issue-dot{{if .Crit}} crit{{end}}"></span>
+        <span class="issue-label">{{.Label}}</span>
+        <span class="issue-num">{{.Count}}</span>
+      </a>
+      {{end}}
+    </div>
+    {{else}}<div class="empty">Открытых проблем нет.</div>{{end}}
+  </div>
+
+  <div class="dash-row" style="margin-top:16px">
     <div class="card">
       <div class="card-header">
         <span class="card-title">Нагрузка по парку устройств</span>
@@ -151,7 +178,7 @@
       <div class="card-header"><span class="card-title">Активность действий</span></div>
       {{range .Activity}}
       <div class="act">
-        <div class="act-ic">{{actionIcon .Action}}</div>
+        <div class="act-ic"><svg class="ico ico-sm"><use href="#i-{{actionIcon .Action}}"/></svg></div>
         <div class="act-time">{{.CreatedAt}}</div>
         <div class="act-text">{{.Action}}{{if .Target}} · {{.Target}}{{end}} <span class="text-muted" style="font-size:12px">({{.Username}})</span></div>
         <div class="act-cat">{{actionCat .Action}}</div>
@@ -165,86 +192,5 @@
 {{end}}
 
 {{define "scripts"}}
-<script>
-const COLORS = { cpu:'#2f6bed', ram:'#18a058', disk:'#f08c00' };
-let state = { hours:24, metric:'cpu' }, lastPoints = [];
-
-document.getElementById('range').addEventListener('click', e=>{
-  const b = e.target.closest('button[data-h]'); if(!b) return;
-  state.hours = +b.dataset.h;
-  document.querySelectorAll('#range button').forEach(x=>x.classList.toggle('on', x===b));
-  loadCharts();
-});
-document.getElementById('tabs').addEventListener('click', e=>{
-  const b = e.target.closest('button[data-m]'); if(!b) return;
-  state.metric = b.dataset.m;
-  document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
-  drawTrends(document.getElementById('trends'), lastPoints, state.metric);
-});
-
-function fmtTs(ts){ return (ts||'').slice(5,16); }
-
-async function loadCharts(){
-  try{
-    const m = await (await fetch(`/api/metrics/fleet?hours=${state.hours}`)).json();
-    lastPoints = m.points||[];
-    drawTrends(document.getElementById('trends'), lastPoints, state.metric);
-  }catch(e){}
-}
-
-function drawTrends(canvas, points, primary){
-  const empty = document.getElementById('trends-empty');
-  if(!points.length){ canvas.style.display='none'; empty.style.display='block'; return; }
-  canvas.style.display='block'; empty.style.display='none';
-  const dpr = window.devicePixelRatio||1, w = canvas.clientWidth, h = canvas.clientHeight;
-  canvas.width=w*dpr; canvas.height=h*dpr;
-  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
-  const padL=34,padR=10,padT=10,padB=22, plotW=w-padL-padR, plotH=h-padT-padB;
-  const yOf=v=>padT+plotH*(1-v/100), xOf=i=>padL+(points.length===1?plotW/2:plotW*i/(points.length-1));
-  const css=getComputedStyle(document.documentElement);
-  ctx.strokeStyle=css.getPropertyValue('--border').trim(); ctx.fillStyle=css.getPropertyValue('--muted').trim();
-  ctx.font='11px sans-serif'; ctx.lineWidth=1; ctx.textAlign='right'; ctx.textBaseline='middle';
-  for(let v=0;v<=100;v+=25){const y=yOf(v);ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(w-padR,y);ctx.stroke();ctx.fillText(v+'%',padL-6,y);}
-  ctx.textBaseline='top'; ctx.textAlign='left'; ctx.fillText(fmtTs(points[0].ts),padL,h-padB+5);
-  if(points.length>1){ctx.textAlign='right';ctx.fillText(fmtTs(points[points.length-1].ts),w-padR,h-padB+5);}
-  const order = ['cpu','ram','disk'].sort((a,b)=> a===primary?1:(b===primary?-1:0)); // primary last (on top)
-  for(const k of order){
-    const isP = k===primary;
-    if(isP){ // заливка под основной линией
-      ctx.beginPath(); let st=false;
-      points.forEach((p,i)=>{const v=p[k]; if(v==null){return;} const x=xOf(i),y=yOf(v); st?ctx.lineTo(x,y):(ctx.moveTo(x,y),st=true);});
-      ctx.lineTo(xOf(points.length-1), yOf(0)); ctx.lineTo(xOf(0), yOf(0)); ctx.closePath();
-      ctx.fillStyle = COLORS[k]+'1f'; ctx.fill();
-    }
-    ctx.strokeStyle=COLORS[k]; ctx.globalAlpha = isP?1:0.45; ctx.lineWidth = isP?2.2:1.2; ctx.beginPath();
-    let st=false;
-    points.forEach((p,i)=>{const v=p[k]; if(v==null){st=false;return;} const x=xOf(i),y=yOf(v); st?ctx.lineTo(x,y):(ctx.moveTo(x,y),st=true);});
-    ctx.stroke(); ctx.globalAlpha=1;
-  }
-}
-loadCharts();
-
-// ── авто-обновление статусов парка (без перезагрузки) ──
-function dPct(part, total){ return total ? Math.round(part*100/total) : 0; }
-async function refreshDashboard(){
-  if(document.hidden) return;
-  let d;
-  try{ d = await (await fetch('/api/devices/status')).json(); }catch(e){ return; }
-  const s = d.summary || {}; const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
-  const total=s.total||0, online=s.online||0, offline=s.offline||0, unknown=s.unknown||0;
-  set('d-online', online); set('d-total', total); set('d-offline', offline);
-  set('d-alerts', s.alerts||0);
-  const onPct=dPct(online,total);
-  set('d-onpct', onPct+'%'); set('d-donut-pct', onPct+'%');
-  set('d-lg-on', online);   set('d-lg-on-pct', onPct+'%');
-  set('d-lg-off', offline); set('d-lg-off-pct', dPct(offline,total)+'%');
-  set('d-lg-unk', unknown); set('d-lg-unk-pct', dPct(unknown,total)+'%');
-  const donut = document.getElementById('d-donut');
-  if(donut && total){
-    const on=online/total*100, off=on+offline/total*100;
-    donut.style.background = `conic-gradient(#18a058 0 ${on.toFixed(1)}%, #e5484d ${on.toFixed(1)}% ${off.toFixed(1)}%, #cdd6e4 ${off.toFixed(1)}% 100%)`;
-  }
-}
-setInterval(refreshDashboard, 20000);
-</script>
+<script src="/static/dashboard.js" defer></script>
 {{end}}

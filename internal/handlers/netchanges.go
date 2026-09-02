@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"netadmin/internal/auth"
@@ -56,6 +57,9 @@ func (a *App) NetworkChangesPage(w http.ResponseWriter, r *http.Request) {
 			}
 			data.All++
 			data.Rows = append(data.Rows, c)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("NetworkChangesPage: %v", err)
 		}
 	}
 	web.RenderPage(w, "network_changes", data)

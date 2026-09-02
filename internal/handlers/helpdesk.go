@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -109,6 +110,17 @@ func (a *App) HelpSubmit(w http.ResponseWriter, r *http.Request) {
 		"От: " + name + locDetail(location) + contactDetail(contact) + "\n\n" + desc +
 		"\n\nОткрыть: /tickets/" + strconv.FormatInt(id, 10))
 
+	// Подтверждение заявителю. Код показывается только на странице после
+	// отправки: закрыв вкладку, человек терял единственный способ отследить
+	// обращение и писал заново.
+	notify.Email(email, "Заявка "+code+" принята",
+		"Здравствуйте, "+name+".\n\n"+
+			"Ваше обращение принято, номер заявки: "+code+"\n"+
+			"Тема: "+title+"\n\n"+
+			"Сохраните этот код — по нему можно посмотреть статус и написать "+
+			"в ИТ-службу на портале заявок, в разделе «Отследить заявку».\n\n"+
+			"Отвечать на это письмо не нужно.")
+
 	http.Redirect(w, r, "/help/track?code="+code+"&new=1", http.StatusSeeOther)
 }
 
@@ -132,6 +144,12 @@ func (a *App) HelpTrack(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Load()
 	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
 	data := helpTrackData{OrgName: cfg.OrganizationName, New: r.URL.Query().Get("new") == "1", Code: code}
+	// код заявки — единственная защита чужого обращения от просмотра,
+	// поэтому перебор кодов ограничиваем по частоте
+	if code != "" && !trackLimiter.allow(clientIP(r)) {
+		http.Error(w, "слишком много запросов, попробуйте позже", http.StatusTooManyRequests)
+		return
+	}
 	if code == "" {
 		web.Render(w, "help_track.html", data)
 		return
@@ -161,6 +179,9 @@ func (a *App) HelpTrack(w http.ResponseWriter, r *http.Request) {
 				c.Created = tz.DateTime(created)
 				data.Comments = append(data.Comments, c)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("HelpTrack: %v", err)
 		}
 		rows.Close()
 	}

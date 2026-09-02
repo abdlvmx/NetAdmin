@@ -16,7 +16,7 @@
     <h1>Лицензии ПО</h1>
     <div class="sub">Учёт: куплено мест против фактического использования по инвентарю</div>
   </div>
-  <div class="datechip">📅 {{today}}</div>
+  <div class="datechip"><svg class="ico ico-sm"><use href="#i-calendar"/></svg> {{today}}</div>
 </div>
 
 <div class="content">
@@ -72,7 +72,7 @@
               <form method="post" action="/licenses/{{.ID}}/update" class="lic-edit">
                 <input name="seats_purchased" type="number" value="{{.Purchased}}">
                 <input name="cost" type="hidden" value="{{.Cost}}">
-                <button class="btn btn-ghost btn-sm" title="Сохранить">💾</button>
+                <button class="btn btn-ghost btn-sm" title="Сохранить"><svg class="ico ico-sm"><use href="#i-disk"/></svg></button>
               </form>
             </td>
             {{else}}
@@ -83,7 +83,7 @@
             <td class="text-muted">{{printf "%.0f" .Cost}} ₽</td>
             {{if eq $.User.Role "admin"}}
             <td>
-              <form method="post" action="/licenses/{{.ID}}/delete" onsubmit="return confirm('Удалить лицензию «{{.Name}}»?')">
+              <form method="post" action="/licenses/{{.ID}}/delete" data-confirm="Удалить лицензию «{{.Name}}»?">
                 <button class="btn btn-ghost btn-sm">Удалить</button>
               </form>
             </td>

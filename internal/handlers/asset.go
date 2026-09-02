@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -65,6 +66,9 @@ func (a *App) DeviceChanges(w http.ResponseWriter, r *http.Request) {
 				it.Ts = tz.DateTime(ts)
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceChanges: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"changes": items})

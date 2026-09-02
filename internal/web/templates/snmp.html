@@ -15,7 +15,7 @@
     <h1>SNMP-устройства</h1>
     <div class="sub">Опрос свитчей, роутеров, ИБП и сетевых принтеров по SNMP v2c · ~раз в минуту</div>
   </div>
-  <div class="datechip">📅 {{today}}</div>
+  <div class="datechip"><svg class="ico ico-sm"><use href="#i-calendar"/></svg> {{today}}</div>
 </div>
 
 <div class="content">
@@ -91,11 +91,11 @@
             {{if $.User.CanWrite}}
             <td>
               <div class="row-actions">
-                <button class="btn btn-ghost btn-sm" onclick="pollNow({{.ID}}, this)">Опросить</button>
+                <button class="btn btn-ghost btn-sm" data-act="poll" data-id="{{.ID}}">Опросить</button>
                 {{if or (eq .Kind "switch") (eq .Kind "router")}}<a class="btn btn-ghost btn-sm" href="/snmp/{{.ID}}/ports">Порты</a>{{end}}
                 {{if eq $.User.Role "admin"}}
                 <form method="post" action="/snmp/{{.ID}}/toggle"><button class="btn btn-ghost btn-sm">{{if .Enabled}}Выкл{{else}}Вкл{{end}}</button></form>
-                <form method="post" action="/snmp/{{.ID}}/delete" onsubmit="return confirm('Удалить устройство?')"><button class="btn btn-ghost btn-sm">Удалить</button></form>
+                <form method="post" action="/snmp/{{.ID}}/delete" data-confirm="Удалить устройство?"><button class="btn btn-ghost btn-sm">Удалить</button></form>
                 {{end}}
               </div>
             </td>
@@ -112,14 +112,5 @@
 {{end}}
 
 {{define "scripts"}}
-<script>
-async function pollNow(id, btn){
-  const old = btn.textContent; btn.disabled=true; btn.textContent='Опрос…';
-  try{
-    const d = await (await fetch(`/snmp/${id}/poll`,{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}})).json();
-    if(d.ok){ toast(d.status==='up'?'Устройство в сети':'Устройство недоступно', d.status==='up'?'ok':'err'); setTimeout(()=>location.reload(),700); }
-    else { toast(d.error||'Ошибка', 'err'); btn.disabled=false; btn.textContent=old; }
-  }catch(e){ toast('Ошибка опроса','err'); btn.disabled=false; btn.textContent=old; }
-}
-</script>
+<script src="/static/snmp.js" defer></script>
 {{end}}

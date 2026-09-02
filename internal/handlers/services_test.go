@@ -1,35 +1,12 @@
 package handlers
 
 import (
-	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"netadmin/internal/ingest"
 )
-
-func postJSON(t *testing.T, srv *httptest.Server, path, token string, payload map[string]any) int {
-	t.Helper()
-	payload["timestamp"] = time.Now().UTC().Unix()
-	b, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", srv.URL+path, bytes.NewReader(b))
-	req.Header.Set("X-Agent-Token", token)
-	mac := hmac.New(sha256.New, []byte(token))
-	mac.Write(b)
-	req.Header.Set("X-Agent-Signature", hex.EncodeToString(mac.Sum(nil)))
-	resp, err := srv.Client().Do(req)
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode
-}
 
 // В инвентарной редакции новая служба пишется в историю устройства, но НЕ создаёт
 // security-событие (это учёт конфигурации, не СОВ).
@@ -47,9 +24,9 @@ func TestServicesInventoryHistoryNoEvent(t *testing.T) {
 	svc := func(name, disp, start, path string) map[string]any {
 		return map[string]any{"name": name, "display_name": disp, "start_type": start, "path": path}
 	}
-	postJSON(t, srv, "/api/agent-services", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-services", tok, map[string]any{
 		"hostname": "WS-1", "services": []map[string]any{svc("wuauserv", "Windows Update", "Auto", "")}})
-	postJSON(t, srv, "/api/agent-services", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-services", tok, map[string]any{
 		"hostname": "WS-1", "services": []map[string]any{
 			svc("wuauserv", "Windows Update", "Auto", ""), svc("EvilSvc", "Backdoor", "Auto", `C:\evil.exe`)}})
 
@@ -76,7 +53,7 @@ func TestAgentServicesSnapshotDiff(t *testing.T) {
 	}
 
 	// первый снапшот — устанавливает базу, истории «новых» быть не должно
-	if code := postJSON(t, srv, "/api/agent-services", tok, map[string]any{
+	if code := postJSON(t, app, srv, "/api/agent-services", tok, map[string]any{
 		"hostname": "WS-1",
 		"services": []map[string]any{svc("wuauserv", "Windows Update", "Auto", `C:\Windows\svchost.exe`),
 			svc("Spooler", "Print Spooler", "Auto", `C:\Windows\spoolsv.exe`)},
@@ -88,7 +65,7 @@ func TestAgentServicesSnapshotDiff(t *testing.T) {
 	}
 
 	// второй снапшот — добавилась новая служба
-	postJSON(t, srv, "/api/agent-services", tok, map[string]any{
+	postJSON(t, app, srv, "/api/agent-services", tok, map[string]any{
 		"hostname": "WS-1",
 		"services": []map[string]any{svc("wuauserv", "Windows Update", "Auto", `C:\Windows\svchost.exe`),
 			svc("Spooler", "Print Spooler", "Auto", `C:\Windows\spoolsv.exe`),

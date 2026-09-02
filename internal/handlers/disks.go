@@ -3,9 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"netadmin/internal/auth"
 	"netadmin/internal/notify"
@@ -36,14 +38,16 @@ type diskVerdict struct {
 // assessDisk оценивает здоровье диска по SMART-показателям. Чистая функция — тестируемая.
 // Это мониторинг состояния оборудования, а не средство защиты информации.
 func assessDisk(d diskInfo) diskVerdict {
+	// состояние приходит строкой от PowerShell — регистр не фиксирован
+	health := strings.ToLower(strings.TrimSpace(d.Health))
 	switch {
 	case d.PredictFail:
 		return diskVerdict{"critical", "SMART предсказывает отказ диска"}
-	case d.Health == "Unhealthy":
+	case health == "unhealthy":
 		return diskVerdict{"critical", "Состояние диска: критическое"}
 	case d.WearPct >= 90:
 		return diskVerdict{"critical", fmt.Sprintf("Ресурс SSD почти исчерпан (износ %d%%)", d.WearPct)}
-	case d.Health == "Warning":
+	case health == "warning":
 		return diskVerdict{"warning", "Состояние диска: предупреждение"}
 	case d.WearPct >= 80:
 		return diskVerdict{"warning", fmt.Sprintf("Высокий износ SSD (%d%%)", d.WearPct)}
@@ -58,11 +62,7 @@ func assessDisk(d diskInfo) diskVerdict {
 
 // AgentDisks — POST /api/agent-disks : снимок здоровья дисков хоста (токен+HMAC+timestamp).
 func (a *App) AgentDisks(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := a.resolveAgent(r); !ok {
-		http.Error(w, "invalid agent token", http.StatusUnauthorized)
-		return
-	}
-	body, ok := a.verifyAgentRequest(w, r)
+	ag, ok := a.authAgentPost(w, r)
 	if !ok {
 		return
 	}
@@ -70,15 +70,17 @@ func (a *App) AgentDisks(w http.ResponseWriter, r *http.Request) {
 		Hostname string     `json:"hostname"`
 		Disks    []diskInfo `json:"disks"`
 	}
-	if err := json.Unmarshal(body, &p); err != nil {
+	if err := json.Unmarshal(ag.Body, &p); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
 
-	var did int64
+	// устройство определяется подписью запроса, а не полем в теле: иначе агент
+	// одной машины мог бы переписать инвентарь другой, назвавшись её именем
+	did := ag.DeviceID
 	var host string
-	if a.DB.QueryRow("SELECT id, hostname FROM devices WHERE hostname=?", p.Hostname).Scan(&did, &host) != nil || did == 0 {
-		writeJSON(w, map[string]any{"ok": true, "skipped": "unknown host"})
+	if did == 0 || a.DB.QueryRow("SELECT COALESCE(hostname,'') FROM devices WHERE id=?", did).Scan(&host) != nil {
+		writeAgentJSON(w, ag.Key, map[string]any{"ok": true, "skipped": "not enrolled"})
 		return
 	}
 
@@ -96,6 +98,9 @@ func (a *App) AgentDisks(w http.ResponseWriter, r *http.Request) {
 				}
 				prevBad[key] = assessDisk(diskInfo{Health: health, WearPct: wear, PredictFail: pf == 1}).Severity == "critical"
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("AgentDisks: %v", err)
 		}
 		rows.Close()
 	}
@@ -136,7 +141,7 @@ func (a *App) AgentDisks(w http.ResponseWriter, r *http.Request) {
 		notify.CriticalEvent(host, msg+"\n\nРекомендуется заранее заменить накопитель и сделать резервную копию данных.")
 	}
 
-	writeJSON(w, map[string]any{"ok": true, "count": len(p.Disks)})
+	writeAgentJSON(w, ag.Key, map[string]any{"ok": true, "count": len(p.Disks)})
 }
 
 // DeviceDisks — GET /api/devices/{id}/disks : диски устройства с оценкой состояния.
@@ -167,6 +172,9 @@ func (a *App) DeviceDisks(w http.ResponseWriter, r *http.Request) {
 				it.Severity, it.Issue = v.Severity, v.Issue
 				items = append(items, it)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DeviceDisks: %v", err)
 		}
 	}
 	writeJSON(w, map[string]any{"disks": items})
@@ -241,6 +249,9 @@ func (a *App) DiskHealthPage(w http.ResponseWriter, r *http.Request) {
 				data.Warnings++
 			}
 			data.Rows = append(data.Rows, row)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DiskHealthPage: %v", err)
 		}
 	}
 	data.Hosts = len(hosts)

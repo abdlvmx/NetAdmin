@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"netadmin/internal/auth"
+	"netadmin/internal/backup"
 	"netadmin/internal/config"
 	"netadmin/internal/notify"
 	"netadmin/internal/web"
@@ -23,8 +26,18 @@ type settingsData struct {
 	SMTPTo            string
 	ScanIntervalHours int
 	HelpdeskEnabled   bool
-	Message           string
-	Error             string
+	// Резервные копии
+	BackupIntervalHours int
+	BackupKeep          int
+	BackupDir           string
+	Backups             []backup.Info
+	Message             string
+	Error               string
+}
+
+// backupDir — каталог копий по текущим настройкам.
+func backupDir(cfg config.Config) (string, error) {
+	return backup.Dir(config.DataDir(), cfg.BackupDir)
 }
 
 // SettingsPage — GET /settings (admin).
@@ -35,6 +48,12 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := config.Load()
+	var backups []backup.Info
+	if dir, err := backupDir(cfg); err == nil {
+		backups = backup.List(dir)
+	} else {
+		log.Printf("каталог резервных копий: %v", err)
+	}
 	web.RenderPage(w, "settings", settingsData{
 		User:              user,
 		Active:            "settings",
@@ -47,9 +66,65 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		SMTPTo:            cfg.SMTPTo,
 		ScanIntervalHours: cfg.ScanIntervalHours,
 		HelpdeskEnabled:   cfg.HelpdeskEnabled,
-		Message:           r.URL.Query().Get("message"),
-		Error:             r.URL.Query().Get("error"),
+
+		BackupIntervalHours: cfg.BackupIntervalHours,
+		BackupKeep:          cfg.BackupKeep,
+		BackupDir:           cfg.BackupDir,
+		Backups:             backups,
+
+		Message: r.URL.Query().Get("message"),
+		Error:   r.URL.Query().Get("error"),
 	})
+}
+
+// UpdateBackup — POST /settings/backup (admin): расписание и хранение копий.
+func (a *App) UpdateBackup(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil || !user.IsAdmin() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	_ = r.ParseForm()
+	cfg := config.Load()
+	cfg.BackupIntervalHours, _ = strconv.Atoi(strings.TrimSpace(r.FormValue("interval")))
+	cfg.BackupKeep, _ = strconv.Atoi(strings.TrimSpace(r.FormValue("keep")))
+	cfg.BackupDir = strings.TrimSpace(r.FormValue("dir"))
+	if cfg.BackupIntervalHours < 0 {
+		cfg.BackupIntervalHours = 0
+	}
+	if cfg.BackupKeep < 0 {
+		cfg.BackupKeep = 0
+	}
+	if err := config.Save(cfg); err != nil {
+		http.Redirect(w, r, "/settings?error=Не+удалось+сохранить+настройки", http.StatusSeeOther)
+		return
+	}
+	auth.LogAction(a.DB, user.ID, "backup_settings", strconv.Itoa(cfg.BackupIntervalHours)+" ч",
+		"хранить "+strconv.Itoa(cfg.BackupKeep))
+	http.Redirect(w, r, "/settings?message=Настройки+копирования+сохранены", http.StatusSeeOther)
+}
+
+// BackupNow — POST /settings/backup/now (admin): снять копию немедленно.
+func (a *App) BackupNow(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil || !user.IsAdmin() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	cfg := config.Load()
+	dir, err := backupDir(cfg)
+	if err != nil {
+		http.Redirect(w, r, "/settings?error=Каталог+копий+недоступен", http.StatusSeeOther)
+		return
+	}
+	path, err := backup.Create(a.DB, dir, cfg.BackupKeep)
+	if err != nil {
+		log.Printf("резервное копирование вручную: %v", err)
+		http.Redirect(w, r, "/settings?error=Не+удалось+снять+копию", http.StatusSeeOther)
+		return
+	}
+	auth.LogAction(a.DB, user.ID, "backup_now", filepath.Base(path), "")
+	http.Redirect(w, r, "/settings?message=Копия+создана", http.StatusSeeOther)
 }
 
 // UpdateOrganization — POST /settings/organization (admin).

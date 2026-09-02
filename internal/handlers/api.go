@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -88,6 +89,9 @@ func (a *App) metricSeries(deviceID int64, hours, bucket int) []metricPoint {
 			points = append(points, p)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("metricSeries: %v", err)
+	}
 	return points
 }
 
@@ -142,6 +146,9 @@ func (a *App) DevicesStatus(w http.ResponseWriter, r *http.Request) {
 			offline++
 		}
 		list = append(list, d)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("DevicesStatus: %v", err)
 	}
 	var alerts int
 	a.DB.QueryRow(`SELECT COUNT(*) FROM devices

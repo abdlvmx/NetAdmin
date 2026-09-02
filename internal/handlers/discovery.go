@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,6 +29,9 @@ func (a *App) DiscoverPassive() {
 			if rows.Scan(&m) == nil {
 				known[m] = true
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DiscoverPassive: %v", err)
 		}
 		rows.Close()
 	}
@@ -123,6 +127,9 @@ func (a *App) DiscoveryPage(w http.ResponseWriter, r *http.Request) {
 			}
 			data.Total++
 			data.Rows = append(data.Rows, d)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("DiscoveryPage: %v", err)
 		}
 	}
 	web.RenderPage(w, "discovery", data)

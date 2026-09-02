@@ -41,3 +41,35 @@ func TestSmtpConfigured(t *testing.T) {
 		t.Fatal("заполненный конфиг должен считаться настроенным")
 	}
 }
+
+// Адрес с переводом строки позволил бы дописать заголовки письма и SMTP-команды.
+func TestValidAddrRejectsInjection(t *testing.T) {
+	bad := []string{
+		"a@b.ru\r\nBcc: victim@x.ru",
+		"a@b.ru\nX-Injected: 1",
+		"a@b.ru someone@else.ru",
+		"<a@b.ru>",
+		"a@b.ru,c@d.ru",
+		"без-собаки.ru",
+		"два@собаки@ru",
+		"",
+	}
+	for _, s := range bad {
+		if validAddr(s) {
+			t.Errorf("%q должен отвергаться", s)
+		}
+	}
+	for _, s := range []string{"user@example.ru", "it-otdel@firma.local"} {
+		if !validAddr(s) {
+			t.Errorf("%q должен приниматься", s)
+		}
+	}
+}
+
+// В списке получателей мусорные адреса отсеиваются, годные остаются.
+func TestRecipientsFiltersInvalid(t *testing.T) {
+	got := recipients("ok@a.ru, плохой адрес, second@b.ru")
+	if len(got) != 2 || got[0] != "ok@a.ru" || got[1] != "second@b.ru" {
+		t.Fatalf("ожидались два годных адреса, получено %v", got)
+	}
+}

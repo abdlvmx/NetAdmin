@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -64,14 +65,21 @@ type deployRow struct {
 	Created string
 }
 
+// verRow — сколько машин на какой версии агента.
+type verRow struct {
+	Version string
+	Count   int
+}
+
 type packagesData struct {
-	User     *auth.User
-	Active   string
-	Packages []pkgRow
-	Devices  []employeeOpt
-	Recent   []deployRow
-	Msg      string
-	Err      string
+	User          *auth.User
+	Active        string
+	Packages      []pkgRow
+	Devices       []employeeOpt
+	Recent        []deployRow
+	AgentVersions []verRow
+	Msg           string
+	Err           string
 }
 
 // PackagesPage — GET /packages : дистрибутивы, загрузка, раздача, история.
@@ -97,6 +105,9 @@ func (a *App) PackagesPage(w http.ResponseWriter, r *http.Request) {
 				data.Packages = append(data.Packages, p)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("PackagesPage: %v", err)
+		}
 		rows.Close()
 	}
 	if rows, err := a.DB.Query(`SELECT id, hostname FROM devices WHERE COALESCE(agent_token,'')<>'' ORDER BY hostname`); err == nil {
@@ -105,6 +116,9 @@ func (a *App) PackagesPage(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&o.ID, &o.Name) == nil {
 				data.Devices = append(data.Devices, o)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("PackagesPage: %v", err)
 		}
 		rows.Close()
 	}
@@ -120,8 +134,12 @@ func (a *App) PackagesPage(w http.ResponseWriter, r *http.Request) {
 				data.Recent = append(data.Recent, row)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			log.Printf("PackagesPage: %v", err)
+		}
 		rows.Close()
 	}
+	data.AgentVersions = a.agentVersions()
 	web.RenderPage(w, "packages", data)
 }
 
@@ -151,15 +169,23 @@ func (a *App) UploadPackage(w http.ResponseWriter, r *http.Request) {
 	kind := kindByExt(header.Filename)
 
 	stored := randToken() + filepath.Ext(header.Filename)
-	dst, err := os.Create(filepath.Join(packagesDir(), stored))
+	path := filepath.Join(packagesDir(), stored)
+	dst, err := os.Create(path)
 	if err != nil {
 		http.Redirect(w, r, "/packages?error=Ошибка+сохранения", http.StatusSeeOther)
 		return
 	}
-	defer dst.Close()
 	h := sha256.New()
 	size, err := io.Copy(io.MultiWriter(dst, h), file)
+	// файл закрываем до проверки ошибки: иначе на Windows недописанный файл
+	// не удалить, и в каталоге копился бы мусор после каждой сбойной загрузки
+	closeErr := dst.Close()
+	if err == nil {
+		err = closeErr
+	}
 	if err != nil {
+		_ = os.Remove(path)
+		log.Printf("загрузка дистрибутива %q: %v", header.Filename, err)
 		http.Redirect(w, r, "/packages?error=Ошибка+записи", http.StatusSeeOther)
 		return
 	}
@@ -205,14 +231,7 @@ func (a *App) DeployPackage(w http.ResponseWriter, r *http.Request) {
 	}
 	var targets []int64
 	if r.FormValue("all") != "" {
-		rows, _ := a.DB.Query(`SELECT id FROM devices WHERE COALESCE(agent_token,'')<>''`)
-		for rows.Next() {
-			var id int64
-			if rows.Scan(&id) == nil {
-				targets = append(targets, id)
-			}
-		}
-		rows.Close()
+		targets = a.agentDeviceIDs()
 	} else {
 		for _, s := range r.Form["device"] {
 			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
@@ -226,19 +245,95 @@ func (a *App) DeployPackage(w http.ResponseWriter, r *http.Request) {
 	}
 	payload, _ := json.Marshal(p)
 	for _, id := range targets {
-		a.enqueueTask(id, "install", string(payload), "Установка: "+p.Name, user.ID)
+		a.enqueuePackageTask(id, "install", string(payload), "Установка: "+p.Name, user.ID, p.ID)
 	}
 	auth.LogAction(a.DB, user.ID, "package_deploy", p.Name, strconv.Itoa(len(targets))+" устройств")
 	http.Redirect(w, r, "/packages?message=Установка+поставлена+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
 }
 
+// DeployAgentUpdate — POST /packages/agent-update (admin) : разослать новую
+// сборку агента на все машины с агентом.
+//
+// Переиспользует механизм дистрибутивов: файл agent.exe загружается как обычный
+// пакет, а задача отличается видом — агент не устанавливает его, а подменяет
+// себя, предварительно проверив контрольную сумму и запуск новой сборки.
+func (a *App) DeployAgentUpdate(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil || !user.IsAdmin() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	_ = r.ParseForm()
+	pkgID, _ := strconv.ParseInt(r.FormValue("package_id"), 10, 64)
+	var p installPayload
+	if a.DB.QueryRow(`SELECT id, COALESCE(name,''), COALESCE(kind,''), COALESCE(filename,''), COALESCE(sha256,'')
+		FROM packages WHERE id=?`, pkgID).Scan(&p.ID, &p.Name, &p.Kind, &p.Filename, &p.SHA256) != nil {
+		http.Redirect(w, r, "/packages?error=Сборка+не+найдена", http.StatusSeeOther)
+		return
+	}
+	if p.Kind != "exe" {
+		http.Redirect(w, r, "/packages?error=Сборка+агента+должна+быть+.exe", http.StatusSeeOther)
+		return
+	}
+	if p.SHA256 == "" {
+		http.Redirect(w, r, "/packages?error=У+сборки+нет+контрольной+суммы", http.StatusSeeOther)
+		return
+	}
+
+	targets := a.agentDeviceIDs()
+	if len(targets) == 0 {
+		http.Redirect(w, r, "/packages?error=Нет+устройств+с+агентом", http.StatusSeeOther)
+		return
+	}
+	payload, _ := json.Marshal(p)
+	for _, id := range targets {
+		a.enqueuePackageTask(id, "selfupdate", string(payload), "Обновление агента: "+p.Name, user.ID, p.ID)
+	}
+	auth.LogAction(a.DB, user.ID, "agent_update", p.Name, strconv.Itoa(len(targets))+" устройств")
+	http.Redirect(w, r, "/packages?message=Обновление+агента+поставлено+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
+}
+
+// agentVersions — сводка версий агента по парку (что уже обновилось).
+func (a *App) agentVersions() []verRow {
+	rows, err := a.DB.Query(`SELECT COALESCE(NULLIF(agent_version,''),'неизвестна'), COUNT(*)
+		FROM devices WHERE COALESCE(agent_token,'')<>''
+		GROUP BY 1 ORDER BY 2 DESC`)
+	if err != nil {
+		log.Printf("версии агента: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var out []verRow
+	for rows.Next() {
+		var v verRow
+		if rows.Scan(&v.Version, &v.Count) == nil {
+			out = append(out, v)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("версии агента: %v", err)
+	}
+	return out
+}
+
 // AgentPackageDownload — GET /api/agent-package?id=N : агент скачивает дистрибутив (по токену).
 func (a *App) AgentPackageDownload(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := a.resolveAgent(r); !ok {
-		http.Error(w, "invalid agent token", http.StatusUnauthorized)
+	ag, ok := a.authAgentGet(w, r)
+	if !ok {
 		return
 	}
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	// Агент вправе скачать только тот дистрибутив, который ему назначен, и
+	// только пока задача не завершена. Иначе любой агент выкачивал бы весь
+	// каталог ПО по перебору идентификаторов.
+	var allowed int
+	a.DB.QueryRow(`SELECT 1 FROM agent_tasks
+		WHERE device_id=? AND package_id=? AND status IN ('pending','sent') LIMIT 1`,
+		ag.DeviceID, id).Scan(&allowed)
+	if allowed != 1 {
+		http.Error(w, "package not assigned", http.StatusForbidden)
+		return
+	}
 	var fn, orig string
 	if a.DB.QueryRow("SELECT COALESCE(filename,''), COALESCE(original_name,'') FROM packages WHERE id=?", id).
 		Scan(&fn, &orig) != nil || fn == "" {

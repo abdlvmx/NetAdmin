@@ -15,7 +15,7 @@
     <h1>Мониторинг сервисов</h1>
     <div class="sub">Проверки доступности HTTP/TCP/DNS и время ответа · опрос ~раз в минуту</div>
   </div>
-  <div class="datechip">📅 {{today}}</div>
+  <div class="datechip"><svg class="ico ico-sm"><use href="#i-calendar"/></svg> {{today}}</div>
 </div>
 
 <div class="content">
@@ -81,7 +81,7 @@
             <td>
               <div class="row-actions">
                 <form method="post" action="/monitoring/{{.ID}}/toggle"><button class="btn btn-ghost btn-sm">{{if .Enabled}}Выкл{{else}}Вкл{{end}}</button></form>
-                <form method="post" action="/monitoring/{{.ID}}/delete" onsubmit="return confirm('Удалить проверку?')"><button class="btn btn-ghost btn-sm">Удалить</button></form>
+                <form method="post" action="/monitoring/{{.ID}}/delete" data-confirm="Удалить проверку?"><button class="btn btn-ghost btn-sm">Удалить</button></form>
               </div>
             </td>
             {{end}}

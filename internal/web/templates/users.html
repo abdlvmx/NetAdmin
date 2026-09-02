@@ -7,7 +7,7 @@
     <div class="sub">Локальные учётные записи системы</div>
   </div>
   {{if eq .User.Role "admin"}}
-  <button class="btn btn-primary" onclick="openModal('modal-add')">+ Пользователь</button>
+  <button class="btn btn-primary" data-modal-open="modal-add">+ Пользователь</button>
   {{end}}
 </div>
 
@@ -47,7 +47,7 @@
                   <button class="btn btn-ghost btn-sm">{{if .IsActive}}Отключить{{else}}Включить{{end}}</button>
                 </form>
                 {{if ne .ID $.User.ID}}
-                <form method="post" action="/users/{{.ID}}/delete" onsubmit="return confirm('Удалить {{.Username}}?')">
+                <form method="post" action="/users/{{.ID}}/delete" data-confirm="Удалить {{.Username}}?">
                   <button class="btn btn-ghost btn-sm" style="color:var(--red)">Удалить</button>
                 </form>
                 {{end}}
@@ -64,7 +64,7 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-add" onclick="closeOnOverlay(event,'modal-add')">
+<div class="modal-overlay" id="modal-add" data-modal-overlay="modal-add">
   <div class="modal">
     <h3>Новый пользователь</h3>
     <form method="post" action="/users/create">
@@ -87,7 +87,7 @@
         <div class="form-group"><label>Пароль *</label><input type="password" name="password" required minlength="8"></div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add')">Отмена</button>
+        <button type="button" class="btn btn-ghost" data-modal-close="modal-add">Отмена</button>
         <button type="submit" class="btn btn-primary">Создать</button>
       </div>
     </form>
@@ -96,9 +96,5 @@
 {{end}}
 
 {{define "scripts"}}
-<script>
-function openModal(id){ document.getElementById(id).classList.add('open'); }
-function closeModal(id){ document.getElementById(id).classList.remove('open'); }
-function closeOnOverlay(e,id){ if(e.target===e.currentTarget) closeModal(id); }
-</script>
+<script src="/static/users.js" defer></script>
 {{end}}
