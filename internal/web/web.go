@@ -10,7 +10,9 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"netadmin/internal/tz"
 )
@@ -47,6 +49,18 @@ var funcMap = template.FuncMap{
 	"statusBadge": statusBadge,
 	"prioRu":      prioRu,
 	"prioBadge":   prioBadge,
+	"sizeMB":      sizeMB,
+	"dateTime":    dateTime,
+}
+
+// sizeMB — размер файла в мегабайтах для таблиц.
+func sizeMB(b int64) string {
+	return strconv.FormatFloat(float64(b)/(1<<20), 'f', 1, 64) + " МБ"
+}
+
+// dateTime — момент времени в московской зоне, как и остальные даты.
+func dateTime(t time.Time) string {
+	return t.In(tz.Loc).Format("02.01.2006 15:04")
 }
 
 // statusRu/statusBadge/prioRu/prioBadge — подписи и классы бейджей для заявок helpdesk.

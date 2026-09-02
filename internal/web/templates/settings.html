@@ -87,6 +87,55 @@
     </div>
 
     <div class="card">
+      <div class="card-header"><span class="card-title">Резервные копии базы</span></div>
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Копия снимается средствами SQLite на работающей базе — останавливать сервер не нужно.
+        В ней весь инвентарь, заявки и журнал действий, поэтому каталог копий стоит закрыть
+        от посторонних средствами системы. Интервал 0 — расписание выключено; хранить 0 —
+        старые копии не удаляются.</p>
+      <form method="post" action="/settings/backup">
+        <div class="form-row cols-3">
+          <div class="form-group">
+            <label>Интервал, часов (0 — выкл)</label>
+            <input type="number" name="interval" min="0" max="720" value="{{.BackupIntervalHours}}">
+          </div>
+          <div class="form-group">
+            <label>Хранить копий (0 — все)</label>
+            <input type="number" name="keep" min="0" max="365" value="{{.BackupKeep}}">
+          </div>
+          <div class="form-group">
+            <label>Каталог (пусто — рядом с базой)</label>
+            <input type="text" name="dir" value="{{.BackupDir}}" placeholder="напр. D:\backup\netadmin">
+          </div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-primary">Сохранить</button></div>
+      </form>
+
+      <form method="post" action="/settings/backup/now" style="margin-top:10px">
+        <button class="btn btn-ghost">Снять копию сейчас</button>
+      </form>
+
+      {{if .Backups}}
+      <div class="table-wrap" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Копия</th><th>Размер</th><th>Создана</th></tr></thead>
+          <tbody>
+            {{range .Backups}}
+            <tr>
+              <td>{{.Name}}</td>
+              <td class="text-muted">{{sizeMB .Size}}</td>
+              <td class="text-muted">{{dateTime .Created}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <p class="empty" style="margin-top:14px">Копий пока нет.</p>
+      {{end}}
+    </div>
+
+    <div class="card">
       <div class="card-header"><span class="card-title">Уведомления (Email / SMTP)</span></div>
       <p class="text-muted" style="font-size:12px;margin-bottom:10px">
         Письма о важных событиях. Укажите SMTP-сервер (корпоративный или Яндекс/Mail с паролем

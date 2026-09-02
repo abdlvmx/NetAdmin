@@ -89,6 +89,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/notifications/test", a.TestNotification)
 	mux.HandleFunc("POST /settings/scan", a.UpdateScan)
 	mux.HandleFunc("POST /settings/helpdesk", a.UpdateHelpdesk)
+	mux.HandleFunc("POST /settings/backup", a.UpdateBackup)
+	mux.HandleFunc("POST /settings/backup/now", a.BackupNow)
 
 	// Мониторинг сервисов (HTTP/TCP/DNS/…)
 	mux.HandleFunc("GET /monitoring", a.ServiceMonitorPage)

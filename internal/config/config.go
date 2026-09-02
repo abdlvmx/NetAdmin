@@ -56,7 +56,12 @@ type Config struct {
 	SMTPFrom          string `json:"smtp_from"`
 	SMTPTo            string `json:"smtp_to"`             // получатели через запятую
 	ScanIntervalHours int    `json:"scan_interval_hours"` // 0 = автоскан выключен
-	HelpdeskEnabled   bool   `json:"helpdesk_enabled"`    // приём заявок сотрудников через портал /help
+	// Резервные копии базы. BackupIntervalHours=0 отключает расписание,
+	// ручное копирование остаётся доступным. BackupKeep=0 отключает ротацию.
+	BackupIntervalHours int    `json:"backup_interval_hours"`
+	BackupKeep          int    `json:"backup_keep"`
+	BackupDir           string `json:"backup_dir"`       // пусто = <каталог данных>/backups
+	HelpdeskEnabled     bool   `json:"helpdesk_enabled"` // приём заявок сотрудников через портал /help
 }
 
 // Кэш прочитанной конфигурации.
@@ -104,6 +109,10 @@ func Load() Config {
 	}
 	if c.OrganizationName == "" {
 		c.OrganizationName = DefaultOrgName
+	}
+	if c.BackupIntervalHours == 0 && c.BackupKeep == 0 {
+		// свежая установка: сутки между копиями, храним неделю
+		c.BackupIntervalHours, c.BackupKeep = 24, 7
 	}
 	if c.AgentToken == "" {
 		c.AgentToken = randomToken()

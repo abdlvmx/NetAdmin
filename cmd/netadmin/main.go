@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"netadmin/internal/auth"
+	"netadmin/internal/backup"
 	"netadmin/internal/config"
 	"netadmin/internal/db"
 	"netadmin/internal/handlers"
@@ -61,6 +62,9 @@ func main() {
 		Ingest: ingest.New(database, config.MetricsRetentionDays, config.EventsRetentionDays, config.AuditRetentionDays),
 		Allow:  allow,
 	}
+
+	// резервные копии базы по расписанию
+	go runBackups(database)
 
 	// мониторинг доступности критичных устройств (uptime-алерты)
 	go func() {
@@ -149,6 +153,38 @@ func main() {
 	}
 	app.Ingest.Close()
 	log.Print("остановлено")
+}
+
+// runBackups снимает копии базы по расписанию из настроек.
+//
+// Отсчёт ведётся от времени самой свежей копии в каталоге, а не от запуска
+// сервера: иначе перезапуск сдвигал бы расписание, и при частых перезапусках
+// копия не снималась бы никогда.
+func runBackups(d *sql.DB) {
+	t := time.NewTicker(10 * time.Minute)
+	defer t.Stop()
+	for {
+		cfg := config.Load()
+		if cfg.BackupIntervalHours > 0 {
+			dir, err := backup.Dir(config.DataDir(), cfg.BackupDir)
+			if err != nil {
+				log.Printf("резервное копирование: %v", err)
+			} else {
+				due := true
+				if list := backup.List(dir); len(list) > 0 {
+					due = time.Since(list[0].Created) >= time.Duration(cfg.BackupIntervalHours)*time.Hour
+				}
+				if due {
+					if path, err := backup.Create(d, dir, cfg.BackupKeep); err != nil {
+						log.Printf("резервное копирование: %v", err)
+					} else {
+						log.Printf("резервная копия базы: %s", path)
+					}
+				}
+			}
+		}
+		<-t.C
+	}
 }
 
 // logReachableAddrs печатает адреса, по которым сервер доступен агентам,
