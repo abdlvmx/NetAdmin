@@ -18,6 +18,15 @@ import (
 
 const snmpTimeout = 2 * time.Second
 
+// Пороги состояния расходников и батарей. Вход и выход разные: заряд ИБП,
+// зависший у самой границы, иначе слал бы письмо на каждом опросе.
+const (
+	supplyLowPct  = 15 // тонер/картридж ниже — тревога
+	supplyOkPct   = 20 // и только выше этого она снимается
+	batteryLowPct = 30 // заряд ИБП ниже — тревога
+	batteryOkPct  = 35
+)
+
 // snmpKinds — допустимые типы устройств для опроса.
 var snmpKinds = map[string]string{
 	"auto": "Авто", "switch": "Коммутатор", "router": "Маршрутизатор",
@@ -204,7 +213,34 @@ func (a *App) pollAndSave(id int64, ip string, port uint16, community, kind, pre
 			notify.Message("SNMP-устройство восстановлено: " + label + " (" + ip + ")")
 		}
 	}
+	if status == "up" {
+		a.reportSupplyState(id, kind, ip, label, det)
+	}
 	return status
+}
+
+// reportSupplyState уведомляет о расходниках и батареях: письмо уходит один раз
+// при переходе в проблемное состояние и один раз при возврате в норму, а не на
+// каждом опросе. Признак текущей тревоги хранится в snmp_devices.supply_alert.
+func (a *App) reportSupplyState(id int64, kind, ip, label string, det snmpDetail) {
+	var was int
+	a.DB.QueryRow("SELECT COALESCE(supply_alert,0) FROM snmp_devices WHERE id=?", id).Scan(&was)
+	msgs := snmpAlerts(kind, det, was == 1)
+
+	switch {
+	case len(msgs) > 0 && was == 0:
+		text := label + " (" + ip + "): " + strings.Join(msgs, ", ")
+		a.DB.Exec(`INSERT INTO events (hostname, source, severity, category, message)
+			VALUES (?,?, 'warning','snmp', ?)`, label, "monitor", text)
+		notify.Message("NetAdmin: " + text)
+		a.DB.Exec("UPDATE snmp_devices SET supply_alert=1 WHERE id=?", id)
+	case len(msgs) == 0 && was == 1:
+		text := label + " (" + ip + "): состояние в норме"
+		a.DB.Exec(`INSERT INTO events (hostname, source, severity, category, message)
+			VALUES (?,?, 'info','snmp', ?)`, label, "monitor", text)
+		notify.Message("NetAdmin: " + text)
+		a.DB.Exec("UPDATE snmp_devices SET supply_alert=0 WHERE id=?", id)
+	}
 }
 
 // RunDueSNMP опрашивает SNMP-устройства, у которых истёк интервал. Вызывается фоново.
@@ -311,6 +347,39 @@ func (a *App) SNMPDevicesPage(w http.ResponseWriter, r *http.Request) {
 	web.RenderPage(w, "snmp", data)
 }
 
+// snmpAlerts перечисляет проблемы состояния устройства: заканчивающиеся
+// расходники принтера, ИБП на батарее или с низким зарядом. Это не то же, что
+// недоступность: устройство отвечает, но требует внимания.
+//
+// active — была ли тревога на прошлом опросе. Пока она активна, снимается
+// только на заметно лучшем значении (см. пороги выше), иначе значение у самой
+// границы дребезжало бы письмами.
+//
+// Пустой результат означает «всё в норме».
+func snmpAlerts(kind string, d snmpDetail, active bool) []string {
+	supplyLim, batLim := supplyLowPct, batteryLowPct
+	if active {
+		supplyLim, batLim = supplyOkPct, batteryOkPct
+	}
+	var msgs []string
+	switch kind {
+	case "ups":
+		if d.OnBattery {
+			msgs = append(msgs, "работает от батареи")
+		}
+		if d.BatteryPct > 0 && d.BatteryPct < batLim {
+			msgs = append(msgs, fmt.Sprintf("заряд батареи %d%%", d.BatteryPct))
+		}
+	case "printer":
+		for _, s := range d.Supplies {
+			if s.Known && s.Pct < supplyLim {
+				msgs = append(msgs, fmt.Sprintf("%s %d%%", s.Name, s.Pct))
+			}
+		}
+	}
+	return msgs
+}
+
 // snmpSummary строит краткое описание состояния для строки таблицы + флаг тревоги.
 func snmpSummary(kind, detailJSON string) (string, bool) {
 	if detailJSON == "" {
@@ -328,7 +397,7 @@ func snmpSummary(kind, detailJSON string) (string, bool) {
 		return fmt.Sprintf("Порты: %d из %d активны", d.PortsUp, d.PortsTotal), d.PortsDown > 0
 	case "ups":
 		parts := []string{}
-		warn := d.OnBattery || (d.BatteryPct > 0 && d.BatteryPct < 30)
+		warn := len(snmpAlerts("ups", d, false)) > 0
 		if d.OnBattery {
 			parts = append(parts, "⚡ от батареи")
 		}
@@ -347,12 +416,9 @@ func snmpSummary(kind, detailJSON string) (string, bool) {
 			return "", false
 		}
 		parts := []string{}
-		warn := false
+		warn := len(snmpAlerts("printer", d, false)) > 0
 		for _, s := range d.Supplies {
 			if s.Known {
-				if s.Pct < 15 {
-					warn = true
-				}
 				parts = append(parts, fmt.Sprintf("%s %d%%", s.Name, s.Pct))
 			}
 		}

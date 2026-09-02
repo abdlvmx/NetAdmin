@@ -267,6 +267,7 @@ CREATE TABLE IF NOT EXISTS snmp_devices (
     sys_descr    TEXT,
     uptime_sec   INTEGER DEFAULT 0,
     detail       TEXT,
+    supply_alert INTEGER DEFAULT 0,
     created_at   TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS snmp_ports (
@@ -373,6 +374,7 @@ func InitSchema(d *sql.DB) error {
 		{"devices", "agent_version", "TEXT DEFAULT ''"},
 		{"agent_tasks", "package_id", "INTEGER DEFAULT 0"},
 		{"sessions", "last_activity", "TEXT"},
+		{"snmp_devices", "supply_alert", "INTEGER DEFAULT 0"},
 	} {
 		safeAddColumn(d, m.table, m.col, m.def)
 	}

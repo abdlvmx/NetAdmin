@@ -126,3 +126,63 @@ func TestHumanUptime(t *testing.T) {
 		}
 	}
 }
+
+func TestSnmpAlertsPrinterThresholds(t *testing.T) {
+	full := snmpDetail{Supplies: []snmpSupply{{Name: "Чёрный тонер", Pct: 40, Known: true}}}
+	if got := snmpAlerts("printer", full, false); len(got) != 0 {
+		t.Fatalf("полный картридж не должен давать тревогу: %v", got)
+	}
+	low := snmpDetail{Supplies: []snmpSupply{{Name: "Чёрный тонер", Pct: 8, Known: true}}}
+	got := snmpAlerts("printer", low, false)
+	if len(got) != 1 || !strings.Contains(got[0], "Чёрный тонер 8%") {
+		t.Fatalf("низкий тонер должен давать тревогу с уровнем: %v", got)
+	}
+	// Уровень, неизвестный принтеру, тревогой не считается: 0% там означает
+	// «не сообщил», а не «пусто».
+	unknown := snmpDetail{Supplies: []snmpSupply{{Name: "Барабан", Pct: 0, Known: false}}}
+	if got := snmpAlerts("printer", unknown, false); len(got) != 0 {
+		t.Fatalf("неизвестный уровень не должен давать тревогу: %v", got)
+	}
+}
+
+func TestSnmpAlertsHysteresis(t *testing.T) {
+	// 17% — между порогом входа (15) и выхода (20): тревога не начинается,
+	// но и не снимается, если уже идёт. Иначе письма шли бы на каждом опросе.
+	d := snmpDetail{Supplies: []snmpSupply{{Name: "Тонер", Pct: 17, Known: true}}}
+	if got := snmpAlerts("printer", d, false); len(got) != 0 {
+		t.Fatalf("17%% выше порога входа — тревоги быть не должно: %v", got)
+	}
+	if got := snmpAlerts("printer", d, true); len(got) != 1 {
+		t.Fatalf("при активной тревоге 17%% ещё не норма: %v", got)
+	}
+	// После замены картриджа тревога снимается.
+	fresh := snmpDetail{Supplies: []snmpSupply{{Name: "Тонер", Pct: 95, Known: true}}}
+	if got := snmpAlerts("printer", fresh, true); len(got) != 0 {
+		t.Fatalf("новый картридж должен снимать тревогу: %v", got)
+	}
+}
+
+func TestSnmpAlertsUPS(t *testing.T) {
+	if got := snmpAlerts("ups", snmpDetail{BatteryPct: 100}, false); len(got) != 0 {
+		t.Fatalf("исправный ИБП не должен давать тревогу: %v", got)
+	}
+	got := snmpAlerts("ups", snmpDetail{OnBattery: true, BatteryPct: 22}, false)
+	if len(got) != 2 {
+		t.Fatalf("работа от батареи и низкий заряд — две отдельные причины: %v", got)
+	}
+	// Заряд 32% при активной тревоге ещё не норма (порог выхода 35).
+	if got := snmpAlerts("ups", snmpDetail{BatteryPct: 32}, true); len(got) != 1 {
+		t.Fatalf("32%% при активной тревоге ещё не норма: %v", got)
+	}
+	if got := snmpAlerts("ups", snmpDetail{BatteryPct: 32}, false); len(got) != 0 {
+		t.Fatalf("32%% без активной тревоги — норма: %v", got)
+	}
+}
+
+// Коммутаторы и прочие типы к расходникам отношения не имеют.
+func TestSnmpAlertsIgnoresOtherKinds(t *testing.T) {
+	d := snmpDetail{PortsUp: 1, PortsDown: 4, PortsTotal: 5}
+	if got := snmpAlerts("switch", d, false); len(got) != 0 {
+		t.Fatalf("порты коммутатора не относятся к расходникам: %v", got)
+	}
+}
