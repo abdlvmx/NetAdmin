@@ -5,13 +5,13 @@
   .stats-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   .stat-card { display: flex; flex-direction: column; gap: 10px; }
   .stat-top { display: flex; align-items: center; gap: 10px; }
-  .stat-ic { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center;
-    justify-content: center; font-size: 18px; flex-shrink: 0; }
-  .ic-blue { background: var(--accent-soft); } .ic-amber { background: var(--amber-soft); }
-  .ic-red { background: var(--red-soft); } .ic-green { background: var(--green-soft); }
-  .ic-violet { background: var(--violet-soft); }
+  /* Значок сводки — нейтральная плашка с контуром: цветные подложки под
+     каждым показателем давали четыре разных пятна в одном ряду. */
+  .stat-ic { width: 30px; height: 30px; border-radius: var(--radius-sm); display: flex;
+    align-items: center; justify-content: center; flex-shrink: 0;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
   .stat-top .stat-label { margin: 0; flex: 1; }
-  .stat-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+  .stat-badge { font-size: var(--fs-xs); font-weight: 500; padding: 1px 7px; border-radius: var(--radius-xs); }
   .stat-badge.green { background: var(--green-soft); color: var(--green); }
   .stat-value { font-size: 26px; font-weight: 750; letter-spacing: -0.5px; }
   .stat-value.sm { font-size: 19px; }
@@ -73,29 +73,29 @@
     <h1>Дашборд</h1>
     <div class="sub">Обзор сети и безопасности</div>
   </div>
-  <div class="datechip">📅 {{today}}</div>
+  <div class="datechip"><svg class="ico ico-sm"><use href="#i-calendar"/></svg> {{today}}</div>
 </div>
 
 <div class="content">
   <div class="stats-grid">
     <a href="/devices?status=online" class="stat-card" title="Показать устройства онлайн">
-      <div class="stat-top"><div class="stat-ic ic-blue">💻</div><div class="stat-label">Устройства онлайн</div>
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-devices"/></svg></div><div class="stat-label">Устройства онлайн</div>
         {{if .Stats.DevicesTotal}}<span class="stat-badge green" id="d-onpct">{{.Stats.DevicesOnlinePct}}%</span>{{end}}</div>
       <div class="stat-value"><span id="d-online">{{.Stats.DevicesOnline}}</span> <span class="stat-of">/ <span id="d-total">{{.Stats.DevicesTotal}}</span></span></div>
       <div class="stat-sub"><span id="d-offline">{{.Stats.DevicesOffline}}</span> оффлайн</div>
     </a>
     <a href="/devices?alerts=1" class="stat-card" title="Показать проблемные устройства">
-      <div class="stat-top"><div class="stat-ic ic-amber">⚠️</div><div class="stat-label">Предупреждения</div></div>
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-warning"/></svg></div><div class="stat-label">Предупреждения</div></div>
       <div class="stat-value {{if .Stats.AlertsTotal}}text-red{{end}}" id="d-alerts">{{.Stats.AlertsTotal}}</div>
       <div class="stat-sub">offline, ресурс или heartbeat</div>
     </a>
     <div class="stat-card">
-      <div class="stat-top"><div class="stat-ic ic-green">👥</div><div class="stat-label">Пользователи</div></div>
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-people"/></svg></div><div class="stat-label">Пользователи</div></div>
       <div class="stat-value">{{.Stats.UsersTotal}}</div>
       <div class="stat-sub">{{.Stats.UsersActive}} активных</div>
     </div>
     <div class="stat-card">
-      <div class="stat-top"><div class="stat-ic ic-violet">💓</div><div class="stat-label">Последний heartbeat</div></div>
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-pulse"/></svg></div><div class="stat-label">Последний heartbeat</div></div>
       <div class="stat-value sm">{{.LastHeartbeat}}</div>
       <div class="stat-sub">обновление от агентов</div>
     </div>
@@ -150,7 +150,7 @@
       <div class="card-header"><span class="card-title">Активность действий</span></div>
       {{range .Activity}}
       <div class="act">
-        <div class="act-ic">{{actionIcon .Action}}</div>
+        <div class="act-ic"><svg class="ico ico-sm"><use href="#i-{{actionIcon .Action}}"/></svg></div>
         <div class="act-time">{{.CreatedAt}}</div>
         <div class="act-text">{{.Action}}{{if .Target}} · {{.Target}}{{end}} <span class="text-muted" style="font-size:12px">({{.Username}})</span></div>
         <div class="act-cat">{{actionCat .Action}}</div>

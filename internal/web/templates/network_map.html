@@ -42,12 +42,12 @@
     <h1>Карта сети</h1>
     <div class="sub">Типы, статусы и важность устройств · поиск, фильтры и панель проблем</div>
   </div>
-  <div class="datechip">📅 {{today}}</div>
+  <div class="datechip"><svg class="ico ico-sm"><use href="#i-calendar"/></svg> {{today}}</div>
 </div>
 
 <div class="content">
   <div class="map-toolbar">
-    <input type="text" id="map-search" placeholder="🔍 Поиск: имя, IP, MAC, вендор…">
+    <input type="text" id="map-search" placeholder="Поиск: имя, IP, MAC, вендор…">
     <select id="map-group">
       <option value="type">Группировка: по типу</option>
       <option value="subnet">по подсети</option>
@@ -64,7 +64,7 @@
       <div class="map-tip" id="map-tip"></div>
     </div>
     <div class="card problem-panel">
-      <div class="pp-head">⚠️ Проблемы <span class="badge badge-red" id="pp-count">0</span></div>
+      <div class="pp-head"><svg class="ico ico-sm"><use href="#i-warning"/></svg> Проблемы <span class="badge badge-red" id="pp-count">0</span></div>
       <div class="pp-list" id="pp-list"></div>
     </div>
   </div>
@@ -78,16 +78,20 @@ const css = getComputedStyle(document.documentElement);
 const cv = n => css.getPropertyValue(n).trim();
 const ACCENT = cv('--accent'), ACCENT2 = cv('--accent-hov') || ACCENT, TEXT = cv('--text');
 
+// i — идентификатор значка в общем спрайте (layout.html), s — радиус узла.
 const TYPE = {
-  pc:      { e:'🖥', l:'ПК',              s:8 },
-  server:  { e:'🗄', l:'Сервер',          s:12 },
-  phone:   { e:'📱', l:'Телефон',         s:5 },
-  camera:  { e:'📹', l:'Камера',          s:6 },
-  ap:      { e:'📡', l:'Точка доступа',    s:9 },
-  printer: { e:'🖨', l:'Принтер',         s:7 },
-  network: { e:'🔀', l:'Сеть/коммутатор', s:12 },
-  other:   { e:'🔵', l:'Прочее',          s:7 },
+  pc:      { i:'devices', l:'ПК',              s:8 },
+  server:  { i:'server',  l:'Сервер',          s:12 },
+  phone:   { i:'phone',   l:'Телефон',         s:5 },
+  camera:  { i:'camera',  l:'Камера',          s:6 },
+  ap:      { i:'antenna', l:'Точка доступа',    s:9 },
+  printer: { i:'printer', l:'Принтер',         s:7 },
+  network: { i:'switch',  l:'Сеть/коммутатор', s:12 },
+  other:   { i:'dot',     l:'Прочее',          s:7 },
 };
+
+// tico — значок типа для вставки в HTML (подсказка, легенда, список проблем).
+const tico = t => `<svg class="ico ico-sm"><use href="#i-${(TYPE[t]||TYPE.other).i}"/></svg>`;
 const STC = { online: cv('--green'), stale: cv('--amber'), offline: cv('--red'), unknown: '#9aa6bd' };
 const STL = { online:'онлайн', stale:'давно не отвечал', offline:'оффлайн', unknown:'неизвестно' };
 const SORD = { online:0, stale:1, unknown:2, offline:3 };
@@ -161,7 +165,7 @@ function render() {
     g.appendChild(c);
     if (showLabels) {
       const lt = el('text',{x:p.x,y:p.y+nr+13,'text-anchor':'middle','font-size':11});
-      lt.textContent = t.e + ' ' + trunc(n.hostname || n.ip, 14);
+      lt.textContent = trunc(n.hostname || n.ip, 14);
       g.appendChild(lt);
     }
     c.addEventListener('mouseenter', ()=>{ c.setAttribute('r', nr+3); showTip(n); });
@@ -173,7 +177,8 @@ function render() {
 
   const hub = el('g', {});
   hub.appendChild(el('circle',{cx:0,cy:0,r:32,fill:'url(#hubg)',filter:'url(#ds)'}));
-  const ht = el('text',{x:0,y:7,'text-anchor':'middle','font-size':24}); ht.textContent='🌐'; hub.appendChild(ht);
+  const ht = el('use', {href:'#i-map', x:-11, y:-11, width:22, height:22,
+    fill:'none', stroke:'#fff', 'stroke-width':1.6}); hub.appendChild(ht);
   const gw = el('text',{x:0,y:52,'text-anchor':'middle','font-size':13,'font-weight':700,fill:TEXT}); gw.textContent=gateway; hub.appendChild(gw);
   svg.appendChild(hub);
 
@@ -184,7 +189,7 @@ function showTip(n){
   const tip = document.getElementById('map-tip');
   const t = TYPE[n.type] || TYPE.other;
   tip.innerHTML =
-    `<b>${t.e} ${esc(n.hostname||'—')}</b>${n.critical?' ★':''}<br>${esc(n.ip||'IP —')}` +
+    `<b>${tico(n.type)} ${esc(n.hostname||'—')}</b>${n.critical?' ★':''}<br>${esc(n.ip||'IP —')}` +
     (n.mac?`<br>MAC: ${esc(n.mac)}`:'') + (n.vendor?`<br>${esc(n.vendor)}`:'') +
     `<br>тип: ${t.l}` +
     `<br>статус: <span class="st" style="background:${STC[n.status]}22;color:${STC[n.status]}">${STL[n.status]}</span>` +
@@ -223,7 +228,7 @@ function buildChips(){
     typeOn.add(t);
     const cnt = allNodes.filter(n=>n.type===t).length;
     const b = document.createElement('button'); b.className='on';
-    b.innerHTML = `${TYPE[t].e} ${TYPE[t].l} ${cnt}`;
+    b.innerHTML = `${tico(t)} ${TYPE[t].l} ${cnt}`;
     b.onclick = ()=>{ b.classList.toggle('on'); b.classList.contains('on')?typeOn.add(t):typeOn.delete(t); render(); };
     box.appendChild(b);
   });
@@ -237,12 +242,12 @@ function buildPanel(){
       return w(a)-w(b);
     });
   document.getElementById('pp-count').textContent = probs.length;
-  if (!probs.length){ list.innerHTML = '<div class="pp-empty">Проблемных устройств нет 🎉</div>'; return; }
+  if (!probs.length){ list.innerHTML = '<div class="pp-empty">Проблемных устройств нет</div>'; return; }
   list.innerHTML = '';
   probs.forEach(n=>{
     const t = TYPE[n.type] || TYPE.other;
     const d = document.createElement('div'); d.className='pp-item';
-    d.innerHTML = `<div class="nm"><span class="cdot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${STC[n.status]}"></span>${t.e} ${esc(n.hostname||n.ip||'—')}${n.critical?' ★':''}</div>`+
+    d.innerHTML = `<div class="nm"><span class="cdot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${STC[n.status]}"></span>${tico(n.type)} ${esc(n.hostname||n.ip||'—')}${n.critical?' ★':''}</div>`+
       `<div class="meta">${esc(n.ip||'')} · ${STL[n.status]}${n.last_seen?' · '+esc(n.last_seen):''}</div>`;
     d.onclick = ()=>{ document.getElementById('map-search').value = n.hostname || n.ip || ''; applySearch(); };
     list.appendChild(d);

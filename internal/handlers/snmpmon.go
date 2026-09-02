@@ -193,11 +193,11 @@ func (a *App) pollAndSave(id int64, ip string, port uint16, community, kind, pre
 		if status == "down" {
 			a.DB.Exec(`INSERT INTO events (hostname, source, severity, category, message)
 				VALUES (?,?, 'critical','snmp', ?)`, label, "monitor", "SNMP-устройство недоступно: "+label+" ("+ip+")")
-			notify.Message("⚠️ SNMP-устройство недоступно: " + label + " (" + ip + ")")
+			notify.Message("SNMP-устройство недоступно: " + label + " (" + ip + ")")
 		} else {
 			a.DB.Exec(`INSERT INTO events (hostname, source, severity, category, message)
 				VALUES (?,?, 'info','snmp', ?)`, label, "monitor", "SNMP-устройство восстановлено: "+label+" ("+ip+")")
-			notify.Message("✅ SNMP-устройство восстановлено: " + label + " (" + ip + ")")
+			notify.Message("SNMP-устройство восстановлено: " + label + " (" + ip + ")")
 		}
 	}
 	return status

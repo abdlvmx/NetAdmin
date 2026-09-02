@@ -49,7 +49,7 @@ func SendTest() error {
 	if !smtpConfigured(cfg) {
 		return errors.New("SMTP не настроен")
 	}
-	return sendMail(cfg, "NetAdmin — тестовое уведомление", "✅ Канал email-уведомлений работает.")
+	return sendMail(cfg, "NetAdmin — тестовое уведомление", "Канал email-уведомлений работает.")
 }
 
 func sendAsync(subject, body string) {

@@ -68,13 +68,13 @@
 <body>
 <div class="wrap">
   <div class="logo">
-    <div class="mark">🎫</div>
+    <div class="mark"><svg class="ico"><use href="#i-ticket"/></svg></div>
     <h1>Статус заявки</h1>
   </div>
 
   {{if .New}}
   <div class="ok-banner">
-    ✅ Заявка принята! Сохраните код для отслеживания:
+    <svg class="ico ico-sm"><use href="#i-check"/></svg> Заявка принята! Сохраните код для отслеживания:
     <div class="code">{{.Code}}</div>
     {{if .Found}}{{if not .Comments}}<div style="margin-top:10px">Если вы указали email — уведомления о ходе работы придут на почту.</div>{{end}}{{end}}
   </div>

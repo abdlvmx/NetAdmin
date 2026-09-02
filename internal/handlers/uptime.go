@@ -45,7 +45,7 @@ func (a *App) CheckCritical() {
 				a.DB.Exec(`INSERT INTO events (hostname, source, event_id, severity, category, message)
 					VALUES (?, 'correlation', 0, 'info', 'uptime', ?)`,
 					d.host, fmt.Sprintf("Связь с %s восстановлена (была недоступна %s)", d.host, dur))
-				notify.Message(fmt.Sprintf("✅ NetAdmin: связь с %s восстановлена (была недоступна %s)", d.host, dur))
+				notify.Message(fmt.Sprintf("NetAdmin: связь с %s восстановлена (была недоступна %s)", d.host, dur))
 			}
 			continue
 		}

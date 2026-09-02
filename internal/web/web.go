@@ -75,21 +75,23 @@ func prioBadge(p string) string {
 	return "badge-gray"
 }
 
-// actionIcon — эмодзи-иконка для записи журнала по типу действия.
+// actionIcon — идентификатор значка в спрайте (layout.html) для записи журнала.
+// Возвращается имя символа, а не эмодзи: набор значков общий для всего
+// интерфейса и не зависит от того, как система рисует эмодзи.
 func actionIcon(action string) string {
 	switch {
 	case strings.Contains(action, "login"), strings.Contains(action, "logout"):
-		return "👤"
+		return "key"
 	case strings.Contains(action, "device"):
-		return "💻"
+		return "devices"
 	case strings.Contains(action, "scan"):
-		return "📡"
+		return "search"
 	case strings.Contains(action, "employee"), strings.Contains(action, "department"):
-		return "🪪"
+		return "people"
 	case strings.Contains(action, "user"):
-		return "👥"
+		return "shield"
 	default:
-		return "⚙"
+		return "settings"
 	}
 }
 

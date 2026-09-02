@@ -52,9 +52,9 @@ func (a *App) RunDueChecks() {
 		// уведомление о переходе up<->down
 		if c.prevS != "" && c.prevS != status {
 			if status == "down" {
-				notify.Message("⚠️ Сервис недоступен: " + c.name + " (" + c.target + ")")
+				notify.Message("Сервис недоступен: " + c.name + " (" + c.target + ")")
 			} else {
-				notify.Message("✅ Сервис восстановлен: " + c.name + " (" + c.target + ")")
+				notify.Message("Сервис восстановлен: " + c.name + " (" + c.target + ")")
 			}
 		}
 	}

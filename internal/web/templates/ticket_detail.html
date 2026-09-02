@@ -43,7 +43,7 @@
         <div class="card-title" style="margin-bottom:14px">Переписка</div>
         {{range .Comments}}
         <div class="msg{{if .Internal}} internal{{end}}">
-          <div class="who"><b>{{.Author}}</b> · {{.Created}}{{if .Internal}} · 🔒 внутренняя заметка{{end}}</div>
+          <div class="who"><b>{{.Author}}</b> · {{.Created}}{{if .Internal}} · <svg class="ico ico-sm"><use href="#i-lock"/></svg> внутренняя заметка{{end}}</div>
           <div class="body">{{.Body}}</div>
         </div>
         {{else}}

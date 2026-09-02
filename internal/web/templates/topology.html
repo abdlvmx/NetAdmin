@@ -17,7 +17,7 @@
     <h1>Зависимости устройств</h1>
     <div class="sub">Карта зависимостей (родитель → зависимые) и влияние при сбое узла</div>
   </div>
-  <div class="datechip">📅 {{today}}</div>
+  <div class="datechip"><svg class="ico ico-sm"><use href="#i-calendar"/></svg> {{today}}</div>
 </div>
 
 <div class="content">
@@ -25,7 +25,7 @@
 
   {{if .Impacts}}
   <div class="card" style="margin-bottom:18px;border-color:var(--red)">
-    <div class="card-header"><span class="card-title text-red">⚠️ Влияние сбоев</span></div>
+    <div class="card-header"><span class="card-title text-red"><svg class="ico ico-sm"><use href="#i-warning"/></svg> Влияние сбоев</span></div>
     {{range .Impacts}}
     <div class="impact">
       <div class="head">{{.Parent}} недоступен — затронуты зависимые:</div>
