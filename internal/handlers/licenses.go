@@ -40,26 +40,100 @@ func (a *App) LicensesPage(w http.ResponseWriter, r *http.Request) {
 		COALESCE(seats_purchased,0), COALESCE(cost,0), COALESCE(note,'')
 		FROM software_licenses ORDER BY name`)
 	if err == nil {
-		defer rows.Close()
 		for rows.Next() {
 			var lr licenseRow
 			if rows.Scan(&lr.ID, &lr.Name, &lr.Vendor, &lr.Purchased, &lr.Cost, &lr.Note) != nil {
 				continue
 			}
-			lr.Used = a.licenseUsage(lr.Name)
-			if lr.Used > lr.Purchased {
-				lr.Over = lr.Used - lr.Purchased
-				data.TotalOver += lr.Over
-				data.OverCount++
-			}
-			data.TotalCost += lr.Cost
 			data.Rows = append(data.Rows, lr)
 		}
 		if err := rows.Err(); err != nil {
 			log.Printf("LicensesPage: %v", err)
 		}
+		rows.Close()
+	}
+
+	// Использование считаем одним проходом для всех лицензий сразу. Раньше на
+	// каждую строку шёл отдельный запрос с `LIKE '%…%'`, то есть полный проход
+	// по таблице ПО: на 300 машинах и 20 лицензиях страница отдавалась ~270 мс.
+	names := make([]string, 0, len(data.Rows))
+	for _, lr := range data.Rows {
+		names = append(names, lr.Name)
+	}
+	usage := a.licenseUsageAll(names)
+	for i := range data.Rows {
+		lr := &data.Rows[i]
+		lr.Used = usage[strings.ToLower(strings.TrimSpace(lr.Name))]
+		if lr.Used > lr.Purchased {
+			lr.Over = lr.Used - lr.Purchased
+			data.TotalOver += lr.Over
+			data.OverCount++
+		}
+		data.TotalCost += lr.Cost
 	}
 	web.RenderPage(w, "licenses", data)
+}
+
+// licenseUsageAll считает использование сразу для всех лицензий: сколько
+// устройств несут ПО, подходящее под каждое название. Ключи результата —
+// названия, приведённые к нижнему регистру и без крайних пробелов.
+//
+// Одна выборка вместо запроса на лицензию, а сопоставление — в Go: `LIKE '%…%'`
+// в SQLite стоит около пяти миллисекунд на условие при 45 тысячах строк ПО,
+// тогда как прочитать всю таблицу и сравнить строки в памяти — втрое дешевле.
+// Подробности замеров — в комментарии к forbiddenScan.
+func (a *App) licenseUsageAll(names []string) map[string]int {
+	type key struct {
+		name string
+		dev  int64
+	}
+	seen := map[key]bool{}
+	out := map[string]int{}
+
+	clean := make([]string, 0, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		low := strings.ToLower(n)
+		if _, ok := out[low]; ok {
+			continue // одно и то же название в двух строках — считаем один раз
+		}
+		out[low] = 0
+		clean = append(clean, low)
+	}
+	if len(clean) == 0 {
+		return out
+	}
+
+	rows, err := a.DB.Query(`SELECT device_id, LOWER(COALESCE(name,'')) FROM software`)
+	if err != nil {
+		log.Printf("licenseUsageAll: %v", err)
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var dev int64
+		var sw string
+		if rows.Scan(&dev, &sw) != nil {
+			continue
+		}
+		for _, n := range clean {
+			if !strings.Contains(sw, n) {
+				continue
+			}
+			k := key{n, dev}
+			if !seen[k] { // одно устройство считается один раз, как DISTINCT раньше
+				seen[k] = true
+				out[n]++
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("licenseUsageAll: %v", err)
+	}
+	return out
 }
 
 // licenseUsage — на скольких устройствах установлено ПО, совпадающее по имени.

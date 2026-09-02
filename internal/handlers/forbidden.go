@@ -63,30 +63,53 @@ func (a *App) forbiddenScan() ([]forbRule, []forbFinding, int) {
 		}
 		rows.Close()
 	}
+	// Раньше здесь шёл отдельный запрос на каждое правило. Замеры на парке в
+	// 300 машин (45 тысяч строк ПО) и 25 правилах: 172 мс.
+	//
+	// Дело оказалось не в числе запросов, а в самом `LIKE '%…%'`: один такой
+	// проход стоит 3 мс, но каждое дополнительное условие добавляет ещё около
+	// пяти, поэтому и вариант с 25 условиями через OR остался на 136 мс. Зато
+	// прочитать таблицу целиком — 10 мс, а сопоставить те же 25 шаблонов уже в
+	// Go — ещё 26. Отсюда нынешний способ: одна выборка, отбор в памяти, 36 мс.
+	// Он к тому же не деградирует с ростом числа правил.
+	active := make([]forbRule, 0, len(rules))
+	for _, fr := range rules {
+		if p := strings.TrimSpace(fr.Pattern); p != "" {
+			fr.Pattern = strings.ToLower(p)
+			active = append(active, fr)
+		}
+	}
+	if len(active) == 0 {
+		return rules, nil, 0
+	}
+
 	var findings []forbFinding
 	hosts := map[string]bool{}
-	for _, fr := range rules {
-		if strings.TrimSpace(fr.Pattern) == "" {
+	frows, err := a.DB.Query(`SELECT d.hostname, s.name FROM software s
+		JOIN devices d ON d.id=s.device_id
+		ORDER BY d.hostname, s.name`)
+	if err != nil {
+		log.Printf("forbiddenScan: %v", err)
+		return rules, nil, 0
+	}
+	defer frows.Close()
+	for frows.Next() {
+		var host, sw string
+		if frows.Scan(&host, &sw) != nil {
 			continue
 		}
-		frows, err := a.DB.Query(`SELECT d.hostname, s.name FROM software s
-			JOIN devices d ON d.id=s.device_id
-			WHERE LOWER(COALESCE(s.name,'')) LIKE '%'||LOWER(?)||'%'
-			ORDER BY d.hostname`, fr.Pattern)
-		if err != nil {
-			continue
-		}
-		for frows.Next() {
-			var host, sw string
-			if frows.Scan(&host, &sw) == nil {
+		low := strings.ToLower(sw)
+		// Одна программа может подходить сразу под несколько правил — тогда она
+		// попадает в отчёт по разу на каждое, как было и раньше.
+		for _, fr := range active {
+			if strings.Contains(low, fr.Pattern) {
 				findings = append(findings, forbFinding{Hostname: host, Software: sw, Category: fr.Category})
 				hosts[host] = true
 			}
 		}
-		if err := frows.Err(); err != nil {
-			log.Printf("forbiddenScan: %v", err)
-		}
-		frows.Close()
+	}
+	if err := frows.Err(); err != nil {
+		log.Printf("forbiddenScan: %v", err)
 	}
 	return rules, findings, len(hosts)
 }

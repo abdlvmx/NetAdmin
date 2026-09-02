@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,5 +116,57 @@ func TestSLAPageShowsDashWithoutData(t *testing.T) {
 	})
 	if !strings.Contains(rec2.Body.String(), "99.95%") {
 		t.Error("при наличии данных должна показываться средняя доступность")
+	}
+}
+
+// allDailySeries заменила запрос-на-устройство. Проверяем, что она сводит
+// метрики по дням, разделяет устройства и не путает диск с ОЗУ.
+func TestAllDailySeries(t *testing.T) {
+	app := newTestApp(t)
+	app.DB.Exec("INSERT INTO devices (id,hostname,status) VALUES (1,'a','online'),(2,'b','online')")
+	// Два замера в один день должны усредниться в одно значение.
+	app.DB.Exec(`INSERT INTO metrics_history (device_id, cpu_usage, ram_usage, disk_usage, ts) VALUES
+		(1, 0, 40, 10, datetime('now','-2 days')),
+		(1, 0, 60, 30, datetime('now','-2 days')),
+		(1, 0, 50, 50, datetime('now','-1 days')),
+		(2, 0, 10, 70, datetime('now','-1 days'))`)
+
+	disk, ram := app.allDailySeries()
+	if got := len(disk[1]); got != 2 {
+		t.Fatalf("устройство 1: ожидалось 2 дня, получено %d (%v)", got, disk[1])
+	}
+	if disk[1][0] != 20 { // (10+30)/2
+		t.Errorf("диск за первый день: %v, ожидалось 20", disk[1][0])
+	}
+	if ram[1][0] != 50 { // (40+60)/2
+		t.Errorf("ОЗУ за первый день: %v, ожидалось 50", ram[1][0])
+	}
+	if len(disk[2]) != 1 || disk[2][0] != 70 {
+		t.Errorf("устройство 2: %v, ожидался один день со значением 70", disk[2])
+	}
+	// Устройства без метрик просто отсутствуют, а не дают пустой ряд.
+	if _, ok := disk[99]; ok {
+		t.Error("для устройства без метрик записи быть не должно")
+	}
+}
+
+// Ряды идут в хронологическом порядке: прогноз строит по ним регрессию,
+// и перепутанный порядок дал бы обратный знак наклона.
+func TestAllDailySeriesIsChronological(t *testing.T) {
+	app := newTestApp(t)
+	app.DB.Exec("INSERT INTO devices (id,hostname,status) VALUES (1,'a','online')")
+	for i, v := range []int{10, 40, 70} {
+		app.DB.Exec(`INSERT INTO metrics_history (device_id, cpu_usage, ram_usage, disk_usage, ts)
+			VALUES (1,0,0,?, datetime('now', ?))`, v, fmt.Sprintf("-%d days", 3-i))
+	}
+	disk, _ := app.allDailySeries()
+	want := []float64{10, 40, 70}
+	if len(disk[1]) != len(want) {
+		t.Fatalf("получено %v, ожидалось %v", disk[1], want)
+	}
+	for i := range want {
+		if disk[1][i] != want[i] {
+			t.Fatalf("получено %v, ожидалось %v (по возрастанию даты)", disk[1], want)
+		}
 	}
 }
