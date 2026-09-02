@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -376,4 +377,93 @@ func (a *App) DeviceMetrics(w http.ResponseWriter, r *http.Request) {
 	hours := parseHours(r)
 	points := a.metricSeries(id, hours, metricsBucketSeconds(hours))
 	writeJSON(w, map[string]any{"hours": hours, "points": points})
+}
+
+// BulkDevices — POST /devices/bulk : одно действие над несколькими устройствами.
+//
+// На парке в сотню машин правка по одной — основная трата времени при
+// инвентаризации: расположение и владелец меняются сразу у целого кабинета.
+func (a *App) BulkDevices(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil || !user.CanWrite() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	_ = r.ParseForm()
+	action := strings.TrimSpace(r.FormValue("action"))
+	value := strings.TrimSpace(r.FormValue("value"))
+
+	// Удаление оставлено администратору — как и удаление по одному.
+	if action == "delete" && !user.IsAdmin() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	var ids []int64
+	for _, s := range r.Form["device"] {
+		if id, err := strconv.ParseInt(s, 10, 64); err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		http.Redirect(w, r, "/devices?error=Не+выбраны+устройства", http.StatusSeeOther)
+		return
+	}
+
+	// Список идентификаторов подставляем плейсхолдерами, а не склейкой строки.
+	marks := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+
+	var query string
+	switch action {
+	case "location":
+		query = "UPDATE devices SET location=? WHERE id IN (" + marks + ")"
+		args = append(args, value)
+	case "type":
+		query = "UPDATE devices SET device_type=? WHERE id IN (" + marks + ")"
+		args = append(args, value)
+	case "employee":
+		// пустое значение снимает привязку
+		query = "UPDATE devices SET employee_id=? WHERE id IN (" + marks + ")"
+		args = append(args, nullableID(value))
+	case "critical":
+		query = "UPDATE devices SET critical=? WHERE id IN (" + marks + ")"
+		args = append(args, boolParam(value))
+	case "delete":
+		query = "DELETE FROM devices WHERE id IN (" + marks + ")"
+	default:
+		http.Redirect(w, r, "/devices?error=Неизвестное+действие", http.StatusSeeOther)
+		return
+	}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+
+	res, err := a.DB.Exec(query, args...)
+	if err != nil {
+		log.Printf("групповая операция %q: %v", action, err)
+		http.Redirect(w, r, "/devices?error=Не+удалось+применить+действие", http.StatusSeeOther)
+		return
+	}
+	n, _ := res.RowsAffected()
+	auth.LogAction(a.DB, user.ID, "devices_bulk_"+action, value, strconv.FormatInt(n, 10)+" устройств")
+	http.Redirect(w, r, "/devices?message="+url.QueryEscape(bulkMessage(action, n)), http.StatusSeeOther)
+}
+
+// bulkMessage — человекочитаемый итог групповой операции.
+func bulkMessage(action string, n int64) string {
+	cnt := strconv.FormatInt(n, 10)
+	switch action {
+	case "location":
+		return "Расположение изменено у " + cnt + " устройств"
+	case "type":
+		return "Тип изменён у " + cnt + " устройств"
+	case "employee":
+		return "Владелец изменён у " + cnt + " устройств"
+	case "critical":
+		return "Важность изменена у " + cnt + " устройств"
+	case "delete":
+		return "Удалено устройств: " + cnt
+	}
+	return "Изменено устройств: " + cnt
 }

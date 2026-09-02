@@ -19,10 +19,25 @@ func TestNetworkMapRenders(t *testing.T) {
 	if strings.Contains(body, "template error") {
 		t.Fatalf("ошибка шаблона карты: %s", body)
 	}
-	for _, want := range []string{"Карта сети", "map-search", "pp-list", "/api/network-map"} {
+	// Адрес API больше не встречается в разметке: скрипт вынесен в /static
+	// ради политики безопасности, поэтому страница ссылается на файл, а сам
+	// запрос проверяем в нём.
+	for _, want := range []string{"Карта сети", "map-search", "pp-list", "/static/network_map.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("в выводе карты нет %q", want)
 		}
+	}
+}
+
+// Скрипт карты действительно ходит за данными: страница сама по себе пуста,
+// и без этой проверки вынос кода в статику прошёл бы незамеченным.
+func TestNetworkMapScriptFetchesAPI(t *testing.T) {
+	js, err := web.StaticFile("network_map.js")
+	if err != nil {
+		t.Fatalf("скрипт карты недоступен: %v", err)
+	}
+	if !strings.Contains(string(js), "/api/network-map") {
+		t.Fatal("скрипт карты не запрашивает /api/network-map")
 	}
 }
 

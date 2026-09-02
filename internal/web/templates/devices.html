@@ -2,6 +2,13 @@
 
 {{define "extra_head"}}
 <style>
+  /* Панель групповых действий появляется, только когда что-то выбрано. */
+  .bulk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border-2);
+    border-radius: var(--radius-sm); background: var(--surface-2); }
+  .bulk-bar[hidden] { display: none; }
+  .bulk-bar select, .bulk-bar input { width: auto; min-width: 170px; }
+  .bulk-count { font-size: var(--fs-sm); color: var(--muted); margin-right: 4px; }
   .device-name { font-weight: 600; white-space: nowrap; }
   .dev-link { color: var(--accent); text-decoration: none; }
   .dev-link:hover { text-decoration: underline; }
@@ -89,10 +96,36 @@
     <a href="/devices/export" class="btn btn-ghost">Экспорт CSV</a>
   </div>
   <div class="card">
+    {{if .User.CanWrite}}
+    <form method="post" action="/devices/bulk" id="bulk-form" class="bulk-bar" hidden
+          data-confirm="Применить действие к выбранным устройствам?">
+      <span class="bulk-count"><b id="bulk-n">0</b> выбрано</span>
+      <select name="action" id="bulk-action">
+        <option value="location">Расположение</option>
+        <option value="employee">Владелец</option>
+        <option value="type">Тип устройства</option>
+        <option value="critical">Важность</option>
+        {{if .User.IsAdmin}}<option value="delete">Удалить</option>{{end}}
+      </select>
+      <input type="text" name="value" id="bulk-text" placeholder="напр. каб. 201">
+      <select name="value" id="bulk-employee" hidden>
+        <option value="">— без владельца —</option>
+        {{range .Employees}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      <select name="value" id="bulk-critical" hidden>
+        <option value="1">Критически важное</option>
+        <option value="0">Обычное</option>
+      </select>
+      <button class="btn btn-primary btn-sm" type="submit">Применить</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-act="bulkClear">Снять выбор</button>
+    </form>
+    {{end}}
+
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
+            {{if .User.CanWrite}}<th style="width:28px"><input type="checkbox" id="dev-all" title="Выбрать все видимые" style="width:auto"></th>{{end}}
             <th data-sort title="Сортировка по IP-адресу (по возрастанию / убыванию)">Хост / IP</th><th>Инвентарь</th><th>Владелец</th>
             <th>Расположение</th><th data-sort title="Установлен ли агент на устройстве">Агент</th><th data-sort>Статус</th><th data-sort>Онлайн</th><th></th>
           </tr>
@@ -100,6 +133,7 @@
         <tbody id="dev-body">
           {{range .Devices}}
           <tr id="row-{{.ID}}" data-status="{{.Status}}" data-alert="{{if .Alert}}1{{else}}0{{end}}" data-agent="{{if .HasToken}}yes{{else}}no{{end}}">
+            {{if $.User.CanWrite}}<td><input type="checkbox" class="dev-pick" value="{{.ID}}" style="width:auto"></td>{{end}}
             <td data-sort-val="{{.IP}}">
               <div class="device-name"><a href="/devices/{{.ID}}" class="dev-link">{{.Hostname}}</a>{{if .Critical}} <span class="badge badge-amber" style="font-size:10px" title="критически важное — мониторинг доступности">★</span>{{end}}</div>
               <div class="device-meta">{{if .IP}}{{.IP}}{{else}}—{{end}}{{if .MAC}} · {{.MAC}}{{end}}</div>
@@ -138,7 +172,7 @@
             </td>
           </tr>
           {{else}}
-          <tr><td colspan="8" class="empty">Устройств нет. Добавьте вручную или запустите агента.</td></tr>
+          <tr><td colspan="9" class="empty">Устройств нет. Добавьте вручную или запустите агента.</td></tr>
           {{end}}
         </tbody>
       </table>

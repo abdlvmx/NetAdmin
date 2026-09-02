@@ -48,6 +48,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /devices/create", a.CreateDevice)
 	mux.HandleFunc("POST /devices/{id}/update", a.UpdateDevice)
 	mux.HandleFunc("POST /devices/{id}/delete", a.DeleteDevice)
+	// одно действие над несколькими устройствами сразу
+	mux.HandleFunc("POST /devices/bulk", a.BulkDevices)
 	mux.HandleFunc("GET /devices/export", a.ExportDevices)
 	mux.HandleFunc("POST /devices/{id}/agent-token/revoke", a.RevokeAgentToken)
 	mux.HandleFunc("POST /devices/{id}/scan-ports", a.ScanPorts)

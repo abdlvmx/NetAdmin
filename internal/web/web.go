@@ -23,6 +23,12 @@ var fsys embed.FS
 //go:embed static
 var staticFS embed.FS
 
+// StaticFile возвращает содержимое встроенного файла статики. Нужен тестам:
+// иначе вынесенный из шаблона скрипт нечем проверить.
+func StaticFile(name string) ([]byte, error) {
+	return staticFS.ReadFile("static/" + name)
+}
+
 // Static отдаёт встроенные скрипты. Вынесены из HTML, чтобы политика
 // безопасности могла запретить исполняемый код внутри страницы: без этого
 // в script-src приходится держать unsafe-inline, который снимает основную
