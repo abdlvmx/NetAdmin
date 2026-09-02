@@ -6,17 +6,47 @@
 package main
 
 import (
+	"database/sql"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
+	"strings"
+	"time"
 
 	"netadmin/internal/auth"
 	"netadmin/internal/config"
 	"netadmin/internal/db"
 )
 
+// demoHost — одно тестовое устройство. Список общий для наполнения базы и для
+// режима -keepalive, чтобы «живой» статус в демо совпадал с задуманным.
+type demoHost struct {
+	host, ip, mac, os, status, typ, loc string
+	emp                                 int
+	agent                               bool
+	crit                                bool
+}
+
+var demoHosts = []demoHost{
+	{"BUH-01", "192.168.1.11", "AA:BB:CC:00:00:01", "Windows", "online", "Рабочая станция", "каб. 201", 1, true, false},
+	{"BUH-02", "192.168.1.12", "AA:BB:CC:00:00:02", "Windows", "online", "Рабочая станция", "каб. 201", 2, true, false},
+	{"KADR-01", "192.168.1.21", "AA:BB:CC:00:00:03", "Windows", "offline", "Рабочая станция", "каб. 105", 3, true, false},
+	{"PROIZV-01", "192.168.1.31", "AA:BB:CC:00:00:04", "Windows", "online", "Рабочая станция", "цех 1", 4, true, false},
+	{"SRV-1C", "192.168.1.5", "AA:BB:CC:00:00:05", "Windows", "online", "Сервер", "серверная", 0, true, true},
+	{"SRV-FILE", "192.168.1.6", "AA:BB:CC:00:00:06", "Windows", "online", "Сервер", "серверная", 0, true, true},
+	{"SW-CORE", "192.168.1.2", "AA:BB:CC:00:00:07", "", "online", "Коммутатор", "серверная", 0, false, true},
+	{"PRINTER-BUH", "192.168.1.50", "AA:BB:CC:00:00:08", "", "online", "Принтер", "каб. 201", 0, false, false},
+	{"NVR-01", "192.168.1.60", "AA:BB:CC:00:00:09", "", "offline", "Видеорегистратор", "проходная", 0, false, false},
+}
+
 func main() {
+	keepalive := flag.Bool("keepalive", false,
+		"не наполнять базу, а держать тестовые устройства «онлайн» до Ctrl+C (для снятия скриншотов)")
+	every := flag.Duration("every", 10*time.Second, "период обновления в режиме -keepalive")
+	flag.Parse()
+
 	d, err := db.Open(config.DBPath())
 	if err != nil {
 		log.Fatal(err)
@@ -31,6 +61,12 @@ func main() {
 	if os.Getenv("NETADMIN_SEED_CONFIRM") != "1" {
 		log.Fatal("это инструмент разработчика: задайте NETADMIN_SEED_CONFIRM=1 и отдельный NETADMIN_DATA_DIR")
 	}
+
+	if *keepalive {
+		runKeepalive(d, *every)
+		return
+	}
+
 	var users int
 	d.QueryRow("SELECT COUNT(*) FROM users").Scan(&users)
 	if users > 0 {
@@ -38,15 +74,15 @@ func main() {
 	}
 
 	hash, _ := auth.HashPassword("Parol12345")
-	d.Exec(`INSERT OR IGNORE INTO users (username, full_name, email, role, password_hash)
+	mustExec(d, `INSERT OR IGNORE INTO users (username, full_name, email, role, password_hash)
 		VALUES ('admin','Иванов Иван Иванович','admin@firma.local','admin',?)`, hash)
-	d.Exec(`INSERT OR IGNORE INTO users (username, full_name, role, password_hash)
+	mustExec(d, `INSERT OR IGNORE INTO users (username, full_name, role, password_hash)
 		VALUES ('operator','Петров Пётр','user',?)`, hash)
-	d.Exec(`INSERT OR IGNORE INTO users (username, full_name, role, password_hash)
+	mustExec(d, `INSERT OR IGNORE INTO users (username, full_name, role, password_hash)
 		VALUES ('viewer','Сидорова Анна','viewer',?)`, hash)
 
 	for _, dep := range []string{"Бухгалтерия", "Отдел кадров", "Производство", "ИТ-отдел"} {
-		d.Exec(`INSERT OR IGNORE INTO departments (name) VALUES (?)`, dep)
+		mustExec(d, `INSERT OR IGNORE INTO departments (name) VALUES (?)`, dep)
 	}
 	emps := []struct {
 		name, pos string
@@ -59,26 +95,11 @@ func main() {
 		{"Новиков Сергей Павлович", "Системный администратор", 4},
 	}
 	for _, e := range emps {
-		d.Exec(`INSERT OR IGNORE INTO employees (full_name, position, department_id, email, phone)
+		mustExec(d, `INSERT OR IGNORE INTO employees (full_name, position, department_id, email, phone)
 			VALUES (?,?,?,?,?)`, e.name, e.pos, e.dep, "user@firma.local", "+7 900 000-00-00")
 	}
 
-	hosts := []struct {
-		host, ip, mac, os, status, typ, loc string
-		emp                                 int
-		agent                               bool
-		crit                                bool
-	}{
-		{"BUH-01", "192.168.1.11", "AA:BB:CC:00:00:01", "Windows", "online", "Рабочая станция", "каб. 201", 1, true, false},
-		{"BUH-02", "192.168.1.12", "AA:BB:CC:00:00:02", "Windows", "online", "Рабочая станция", "каб. 201", 2, true, false},
-		{"KADR-01", "192.168.1.21", "AA:BB:CC:00:00:03", "Windows", "offline", "Рабочая станция", "каб. 105", 3, true, false},
-		{"PROIZV-01", "192.168.1.31", "AA:BB:CC:00:00:04", "Windows", "online", "Рабочая станция", "цех 1", 4, true, false},
-		{"SRV-1C", "192.168.1.5", "AA:BB:CC:00:00:05", "Windows", "online", "Сервер", "серверная", 0, true, true},
-		{"SRV-FILE", "192.168.1.6", "AA:BB:CC:00:00:06", "Windows", "online", "Сервер", "серверная", 0, true, true},
-		{"SW-CORE", "192.168.1.2", "AA:BB:CC:00:00:07", "", "online", "Коммутатор", "серверная", 0, false, true},
-		{"PRINTER-BUH", "192.168.1.50", "AA:BB:CC:00:00:08", "", "online", "Принтер", "каб. 201", 0, false, false},
-		{"NVR-01", "192.168.1.60", "AA:BB:CC:00:00:09", "", "offline", "Видеорегистратор", "проходная", 0, false, false},
-	}
+	hosts := demoHosts
 	for i, h := range hosts {
 		tok := ""
 		if h.agent {
@@ -101,13 +122,13 @@ func main() {
 		}
 		id, _ := res.LastInsertId()
 		for j := 0; j < 60; j++ {
-			d.Exec(`INSERT INTO metrics_history (device_id, cpu_usage, ram_usage, disk_usage, ts)
+			mustExec(d, `INSERT INTO metrics_history (device_id, cpu_usage, ram_usage, disk_usage, ts)
 				VALUES (?,?,?,?, datetime('now', ?))`,
 				id, float64(10+rand.Intn(80)), float64(30+rand.Intn(60)), float64(20+rand.Intn(70)),
 				fmt.Sprintf("-%d minutes", j*20))
 		}
 		for _, sw := range []string{"7-Zip 24.08", "Google Chrome 130", "1С:Предприятие 8.3", "Adobe Acrobat Reader"} {
-			d.Exec(`INSERT INTO software (device_id, name, version) VALUES (?,?, '1.0')`, id, sw)
+			mustExec(d, `INSERT INTO software (device_id, name, version) VALUES (?,?, '1.0')`, id, sw)
 		}
 	}
 
@@ -149,8 +170,8 @@ func main() {
 			log.Fatalf("forbidden: %v", err)
 		}
 	}
-	d.Exec(`INSERT INTO software (device_id, name, version) SELECT id, 'uTorrent', '3.6' FROM devices WHERE hostname='KADR-01'`)
-	d.Exec(`INSERT INTO software (device_id, name, version) SELECT id, 'Steam', '1.0' FROM devices WHERE hostname='PROIZV-01'`)
+	mustExec(d, `INSERT INTO software (device_id, name, version) SELECT id, 'uTorrent', '3.6' FROM devices WHERE hostname='KADR-01'`)
+	mustExec(d, `INSERT INTO software (device_id, name, version) SELECT id, 'Steam', '1.0' FROM devices WHERE hostname='PROIZV-01'`)
 
 	for _, l := range []struct {
 		name, vendor string
@@ -219,16 +240,47 @@ func main() {
 		{"KADR-01", "warning", "software", "Установлено новое ПО: uTorrent"},
 		{"192.168.1.99", "warning", "replay", "Отклонён запрос агента: неверная подпись"},
 	} {
-		d.Exec(`INSERT INTO events (hostname, source, event_id, severity, category, message)
+		mustExec(d, `INSERT INTO events (hostname, source, event_id, severity, category, message)
 			VALUES (?, 'correlation', 0, ?, ?, ?)`, e.host, e.sev, e.cat, e.msg)
 	}
 
-	d.Exec(`INSERT INTO audit_log (user_id, action, target, detail) VALUES (1,'login','session','192.168.1.100')`)
-	d.Exec(`INSERT INTO audit_log (user_id, action, target, detail) VALUES (1,'command_run','flushdns','9 устройств')`)
-	d.Exec(`INSERT INTO forbidden_software (pattern, reason) VALUES ('utorrent','Торрент-клиент')`)
-	d.Exec(`INSERT INTO software_licenses (name, vendor, total_seats, expires_at) VALUES ('1С:Предприятие 8.3','1С',10,date('now','+60 days'))`)
+	mustExec(d, `INSERT INTO audit_log (user_id, action, target, detail) VALUES (1,'login','session','192.168.1.100')`)
+	mustExec(d, `INSERT INTO audit_log (user_id, action, target, detail) VALUES (1,'command_run','flushdns','9 устройств')`)
 
 	fmt.Println("готово: admin / Parol12345")
+}
+
+// runKeepalive возвращает тестовым устройствам их задуманный статус и обновляет
+// last_seen, пока работает. Без этого демо-база «умирает» через пару минут:
+// сервер помечает offline всех, от кого не было heartbeat дольше таймаута, а
+// критичные устройства вдобавок пингуются — фиктивные адреса не отвечают.
+// Нужно, чтобы снять скриншоты на живой картинке, а не на полностью красной.
+func runKeepalive(d *sql.DB, every time.Duration) {
+	var devices int
+	d.QueryRow("SELECT COUNT(*) FROM devices").Scan(&devices)
+	if devices == 0 {
+		log.Fatal("база пуста — сначала наполните её без -keepalive")
+	}
+	fmt.Printf("держу тестовые устройства онлайн, обновление раз в %s; Ctrl+C для выхода\n", every)
+	for {
+		for _, h := range demoHosts {
+			if _, err := d.Exec(`UPDATE devices
+				SET status=?, last_seen=datetime('now'), down_streak=0, down_since=NULL
+				WHERE hostname=?`, h.status, h.host); err != nil {
+				log.Printf("keepalive %s: %v", h.host, err)
+			}
+		}
+		time.Sleep(every)
+	}
+}
+
+// mustExec падает на любой ошибке вставки. В инструменте разработчика молчаливая
+// ошибка хуже падения: опечатка в имени колонки просто оставляет раздел
+// приложения пустым, и это выглядит как недоделанная функция, а не как баг seed.
+func mustExec(d *sql.DB, query string, args ...any) {
+	if _, err := d.Exec(query, args...); err != nil {
+		log.Fatalf("seed: %v\nзапрос: %s", err, strings.TrimSpace(query))
+	}
 }
 
 func boolInt(b bool) int {
