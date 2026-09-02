@@ -17,9 +17,30 @@ func writeCSV(w http.ResponseWriter, filename string, header []string, rows [][]
 	cw.Comma = ';'
 	_ = cw.Write(header)
 	for _, r := range rows {
-		_ = cw.Write(r)
+		safe := make([]string, len(r))
+		for i, v := range r {
+			safe[i] = csvSafe(v)
+		}
+		_ = cw.Write(safe)
 	}
 	cw.Flush()
+}
+
+// csvSafe гасит инъекцию формул в табличных процессорах. Excel и LibreOffice
+// трактуют значение ячейки как формулу, если оно начинается с =, +, -, @ или
+// управляющего символа (Tab/CR). Имена хостов и ПО приходят от агента, а имя
+// компьютера на управляемой машине можно задать вида `=cmd|'/c calc'!A1` — и
+// оно выполнится на машине того, кто откроет экспорт. Ведущий апостроф
+// заставляет процессор считать ячейку текстом; на само значение он не влияет.
+func csvSafe(v string) string {
+	if v == "" {
+		return v
+	}
+	switch v[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + v
+	}
+	return v
 }
 
 func statusRU(s string) string {
