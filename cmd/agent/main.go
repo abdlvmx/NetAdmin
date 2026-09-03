@@ -450,6 +450,15 @@ func main() {
 				lastSent = metrics
 				lastHB = time.Now()
 				log.Println("heartbeat:", metrics["hostname"], metrics["cpu"], metrics["ram"], metrics["disk"])
+			default:
+				// Прежде всё, кроме 401/409/200, проваливалось мимо switch без
+				// единого слова в журнале. Самый частый случай — 403 «bad
+				// signature», когда enrollment-токен агента разошёлся с токеном
+				// сервера (например, config.json пересоздали). В логе тогда были
+				// видны только отказы инвентаря, и выглядело это так, будто
+				// heartbeat работает, а не принимается один лишь инвентарь.
+				log.Printf("heartbeat — сервер отверг (HTTP %d): %s",
+					status, strings.TrimSpace(string(body)))
 			}
 		}
 
