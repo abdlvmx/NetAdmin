@@ -54,4 +54,8 @@ schtasks /run /tn "%TASK%" >nul
 echo.
 echo Готово. Агент работает фоново, без окна, перезапускается при загрузке ПК.
 echo Состояние: %DEST%\agent_state.json   Задача: %TASK%
+echo.
+echo Если устройство не появится на сервере, запустите проверку — она скажет,
+echo что именно не так:
+echo     "%EXE%" -check
 endlocal

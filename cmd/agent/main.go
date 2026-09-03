@@ -405,6 +405,15 @@ func main() {
 		return
 	}
 
+	// Самодиагностика: печатает, что настроено, доходит ли до сервера и что
+	// соберётся с этой машины. Окно не закрывается, если запущено двойным
+	// щелчком, — иначе вывод не успеть прочитать.
+	if len(os.Args) > 1 && (os.Args[1] == "-check" || os.Args[1] == "--check") {
+		code := runCheck()
+		holdWindow()
+		os.Exit(code)
+	}
+
 	log.Printf("NetAdmin agent %s → %s", agentVersion, serverURL)
 	cleanupOldBinary() // остаток прошлого самообновления
 	st := loadState()
