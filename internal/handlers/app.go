@@ -182,6 +182,7 @@ func (a *App) Routes() http.Handler {
 	// Карта сети
 	mux.HandleFunc("GET /network-map", a.NetworkMapPage)
 	mux.HandleFunc("GET /api/network-map", a.NetworkMapAPI)
+	mux.HandleFunc("GET /api/search", a.Search)
 
 	// История изменений сети
 	mux.HandleFunc("GET /network-changes", a.NetworkChangesPage)
