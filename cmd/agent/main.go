@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,9 +36,36 @@ import (
 const agentVersion = "1.1.0"
 
 var (
-	serverURL = envOr("NETADMIN_SERVER_URL", "http://127.0.0.1:8765")
+	serverURL = normalizeServerURL(envOr("NETADMIN_SERVER_URL", "http://127.0.0.1:8765"))
 	token     = os.Getenv("NETADMIN_AGENT_TOKEN") // enrollment-токен, только для первой регистрации
 )
+
+// normalizeServerURL достраивает адрес сервера до пригодного для запроса вида.
+//
+// Адрес вписывают руками в install_agent.bat на каждой машине, и «192.168.1.64»
+// вместо «http://192.168.1.64:8765» — самая частая опечатка: агент запускается,
+// но каждый запрос падает с «unsupported protocol scheme». Ошибка молчаливая и
+// повторяется на всём парке, поэтому проще достроить адрес, чем ловить её.
+//
+// Схема по умолчанию http (TLS в продукте нет), порт по умолчанию 8765.
+func normalizeServerURL(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, "/") // иначе в пути получится двойной слеш
+	if s == "" {
+		return "http://127.0.0.1:8765"
+	}
+	if !strings.Contains(s, "://") {
+		s = "http://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return s // не разобрали — оставляем как есть, ошибка вылезет при запросе
+	}
+	if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), "8765")
+	}
+	return u.String()
+}
 
 // Заголовки протокола. Токен по сети не передаётся — он лишь ключ HMAC,
 // а сервер выбирает ключ по идентификатору устройства.
