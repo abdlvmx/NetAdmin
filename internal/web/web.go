@@ -23,6 +23,19 @@ var fsys embed.FS
 //go:embed static
 var staticFS embed.FS
 
+//go:embed assets
+var assetsFS embed.FS
+
+// AgentInstaller возвращает шаблон install_agent.bat со всеми заглушками.
+// Сервер подставляет в него свой адрес и текущий enrollment-токен, чтобы
+// администратору не приходилось вписывать их вручную на каждой машине.
+//
+// Файл — копия deploy/install_agent.bat; их совпадение проверяется тестом,
+// иначе ручной и скачиваемый установщики со временем разошлись бы.
+func AgentInstaller() ([]byte, error) {
+	return assetsFS.ReadFile("assets/install_agent.bat")
+}
+
 // StaticFile возвращает содержимое встроенного файла статики. Нужен тестам:
 // иначе вынесенный из шаблона скрипт нечем проверить.
 func StaticFile(name string) ([]byte, error) {

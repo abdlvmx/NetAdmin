@@ -49,13 +49,43 @@
     </div>
 
     <div class="card">
+      <div class="card-header"><span class="card-title">Установка агента</span></div>
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Скачайте установщик — адрес сервера и токен уже вписаны. На компьютере
+        положите рядом <b>agent.exe</b> и запустите файл от имени администратора.</p>
+      {{if .ServerAddrs}}
+      <form method="get" action="/settings/agent-installer">
+        <div class="form-group">
+          <label>Адрес, по которому агенты видят сервер</label>
+          <select name="host">
+            {{range .ServerAddrs}}
+            <option value="{{.IP}}" {{if eq .IP $.PickedAddr}}selected{{end}}>{{.IP}} — {{.Iface}}</option>
+            {{end}}
+          </select>
+        </div>
+        <button class="btn">Скачать установщик агента</button>
+      </form>
+      <p class="text-muted" style="font-size:12px;margin-top:10px">
+        Если адресов несколько, выберите тот, что в одной подсети с компьютерами
+        сотрудников: у VPN и виртуальных адаптеров адрес свой, и по нему агенты
+        сервер не найдут.
+      </p>
+      {{else}}
+      <a class="btn" href="/settings/agent-installer" download>Скачать установщик агента</a>
+      {{end}}
+      <p class="text-muted" style="font-size:12px;margin-top:10px">
+        После обновления токена ниже установщик нужно скачать заново: прежний
+        перестанет подходить.</p>
+    </div>
+
+    <div class="card">
       <div class="card-header"><span class="card-title">Токен агента</span></div>
       <p class="text-muted" style="font-size:12px;margin-bottom:10px">
         Используется агентами для авторизации heartbeat и событий. Храните в тайне.</p>
       <div class="token-box">
         <input value="{{.AgentToken}}" readonly data-act="selectAll">
         <form method="post" action="/settings/agent-token/rotate"
-              data-confirm="Обновить токен? Старый перестанет работать.">
+              data-confirm="Обновить токен? Старый перестанет работать, агентов придётся переустановить.">
           <button class="btn btn-ghost">Обновить</button>
         </form>
       </div>

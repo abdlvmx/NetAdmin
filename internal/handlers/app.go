@@ -86,6 +86,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /settings", a.SettingsPage)
 	mux.HandleFunc("POST /settings/organization", a.UpdateOrganization)
 	mux.HandleFunc("POST /settings/agent-token/rotate", a.RotateAgentToken)
+	mux.HandleFunc("GET /settings/agent-installer", a.AgentInstaller)
 	mux.HandleFunc("POST /settings/password", a.ChangePassword)
 	mux.HandleFunc("POST /settings/notifications", a.UpdateNotifications)
 	mux.HandleFunc("POST /settings/notifications/test", a.TestNotification)
