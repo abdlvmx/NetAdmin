@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // Адрес сервера вписывают руками в install_agent.bat на каждой машине, поэтому
 // агент достраивает его до пригодного вида, а не падает на каждом запросе.
@@ -39,5 +42,38 @@ func TestNormalizeServerURLKeepsHTTPS(t *testing.T) {
 	}
 	if got := normalizeServerURL("https://netadmin.local:443"); got != "https://netadmin.local:443" {
 		t.Errorf("получено %q", got)
+	}
+}
+
+// Отметка «отправлено» ставится только при успехе. При отказе сервера следующая
+// попытка должна прийтись через inventoryRetry, а не через полный интервал:
+// иначе отвергнутый инвентарь пропадал бы на сутки.
+func TestAttemptStamp(t *testing.T) {
+	const day = 24 * time.Hour
+
+	okStamp := attemptStamp(true, day)
+	tOK, err := time.Parse("2006-01-02 15:04:05", okStamp)
+	if err != nil {
+		t.Fatalf("не разобрано %q: %v", okStamp, err)
+	}
+	if d := time.Since(tOK); d > time.Minute {
+		t.Errorf("при успехе ожидалось текущее время, отклонение %s", d)
+	}
+	if dueSoftware(okStamp) {
+		t.Error("сразу после успешной отправки инвентарь слать не нужно")
+	}
+
+	failStamp := attemptStamp(false, day)
+	if dueSoftware(failStamp) {
+		t.Error("сразу после отказа повторять нельзя — сбор дорогой")
+	}
+	tFail, err := time.Parse("2006-01-02 15:04:05", failStamp)
+	if err != nil {
+		t.Fatalf("не разобрано %q: %v", failStamp, err)
+	}
+	// следующая попытка примерно через inventoryRetry
+	wait := day - time.Since(tFail)
+	if wait < inventoryRetry-time.Minute || wait > inventoryRetry+time.Minute {
+		t.Errorf("повтор ожидался через ~%s, получилось через %s", inventoryRetry, wait)
 	}
 }
