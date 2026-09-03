@@ -13,6 +13,30 @@ set "DEST=%ProgramData%\NetAdmin"
 set "EXE=%DEST%\agent.exe"
 set "TASK=NetAdminAgent"
 
+REM --- проверка настроек ---
+REM Скрипт запускают на каждой машине, и незаполненный шаблон легко пропустить:
+REM заглушки молча уезжали в машинные переменные, агент вставал, но подключиться
+REM не мог, а на экране всё выглядело успешно. Лучше отказаться сразу.
+if "%SERVER_URL%"=="YOUR_URL_HERE" (
+  echo.
+  echo ОШИБКА: не заполнен SERVER_URL в начале этого файла.
+  echo Откройте install_agent.bat блокнотом и впишите адрес сервера, например:
+  echo     set "SERVER_URL=http://192.168.1.10:8765"
+  echo Адрес сервер печатает в журнале при запуске.
+  exit /b 1
+)
+if "%ENROLL_TOKEN%"=="YOUR_TOKEN_HERE" (
+  echo.
+  echo ОШИБКА: не заполнен ENROLL_TOKEN в начале этого файла.
+  echo Скопируйте токен агента со страницы Настройки на сервере и впишите:
+  echo     set "ENROLL_TOKEN=токен_со_страницы_настроек"
+  exit /b 1
+)
+if "%SERVER_URL%"=="" (
+  echo ОШИБКА: SERVER_URL пуст.
+  exit /b 1
+)
+
 echo [1/4] Копирование агента в %DEST% ...
 if not exist "%DEST%" mkdir "%DEST%"
 copy /Y "%~dp0agent.exe" "%EXE%" >nul || (echo ОШИБКА: нет agent.exe рядом с .bat & exit /b 1)
