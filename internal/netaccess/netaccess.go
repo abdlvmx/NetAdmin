@@ -98,6 +98,18 @@ func (l List) Allows(ip string) bool {
 		}
 	}
 	addr = addr.Unmap() // ::ffff:192.168.0.1 → 192.168.0.1
+
+	// Петля разрешена всегда, каким бы ни был список.
+	//
+	// Тот, кто пришёл через неё, уже на машине: он может прочитать базу,
+	// править config.json и останавливать службу. Запрет ему ничего не
+	// закрывает, а стоит дорого — администратор, сузивший список до подсети
+	// организации, терял интерфейс на самом сервере, и вернуть его можно было
+	// только правкой файла руками. По той же причине переставал работать
+	// агент, поставленный кнопкой «на этот компьютер»: он ходит на 127.0.0.1.
+	if addr.IsLoopback() {
+		return true
+	}
 	prefixes := l.prefixes
 	if prefixes == nil {
 		prefixes = defaultPrefixes()
@@ -126,5 +138,5 @@ func (l List) String() string {
 	for _, p := range prefixes {
 		parts = append(parts, p.String())
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(parts, ", ") + " (плюс петля — всегда)"
 }

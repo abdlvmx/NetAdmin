@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"netadmin/internal/config"
+	"netadmin/internal/netaccess"
 )
 
 func location(rec *httptest.ResponseRecorder) string { return rec.Header().Get("Location") }
@@ -61,6 +62,61 @@ func TestUpdateNetworkSavesValidValues(t *testing.T) {
 	cfg := config.Load()
 	if cfg.AllowSubnets != "192.168.1.0/24" || cfg.ListenAddr != "0.0.0.0:8765" {
 		t.Errorf("сохранено %q / %q", cfg.AllowSubnets, cfg.ListenAddr)
+	}
+}
+
+// Администратор, работающий на самом сервере, должен мочь задать подсеть
+// организации.
+//
+// Это и был отвергаемый нормальный случай: с 127.0.0.1 список «192.168.1.0/24»
+// не включал адрес того, кто его задаёт, и защита от самоблокировки его
+// отклоняла — при том, что настроить доступ с самой машины и есть главный
+// способ им пользоваться.
+func TestUpdateNetworkFromTheServerItself(t *testing.T) {
+	app := newTestApp(t)
+	admin := sessionFor(t, app, "admin", "admin")
+
+	form := url.Values{"allow_subnets": {"192.168.1.0/24"}}
+	r := httptest.NewRequest("POST", "/settings/network", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.RemoteAddr = "127.0.0.1:51000"
+	r.AddCookie(admin)
+	rec := httptest.NewRecorder()
+
+	app.UpdateNetwork(rec, r)
+
+	if strings.Contains(location(rec), "error=") {
+		t.Fatalf("подсеть организации, заданная с самого сервера, отклонена: %s", location(rec))
+	}
+	if got := config.Load().AllowSubnets; got != "192.168.1.0/24" {
+		t.Errorf("сохранено %q", got)
+	}
+}
+
+// Сужение подсетей не должно отрезать то, что ходит через петлю.
+//
+// Через неё ходит агент, поставленный кнопкой «на этот компьютер»
+// (localServerURL), и через неё же открывается интерфейс на самом сервере —
+// ярлык на рабочем столе ведёт на 127.0.0.1.
+func TestLoopbackStillReachesServerWithNarrowedSubnets(t *testing.T) {
+	app := newTestApp(t)
+	allow, err := netaccess.Parse("192.168.1.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.Allow = allow
+
+	srv := httptest.NewServer(app.Routes())
+	defer srv.Close()
+
+	resp, err := srv.Client().Get(srv.URL + "/login")
+	if err != nil {
+		t.Fatalf("запрос: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		t.Fatal("запрос через петлю отклонён по подсети: агент на этой же машине " +
+			"перестал бы отчитываться, а интерфейс — открываться на самом сервере")
 	}
 }
 
