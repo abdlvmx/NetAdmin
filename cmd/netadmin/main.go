@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"netadmin/internal/agentbin"
 	"netadmin/internal/auth"
 	"netadmin/internal/backup"
 	"netadmin/internal/config"
@@ -382,6 +383,8 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 		printServerBanner(port, allow, allowSet.Source)
 	}
 
+	warnStaleAgent()
+
 	// Резервные копии запускаются после приветствия: первая снимается сразу,
 	// и её строка иначе падала бы человеку прямо посреди приветствия.
 	if !demoMode {
@@ -433,6 +436,36 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 	app.Ingest.Close()
 	log.Print("остановлено")
 	return failure
+}
+
+// warnStaleAgent говорит, что встроенный агент собран не из той ревизии, что
+// сервер, — то есть машины получат старую сборку.
+//
+// Порядок сборки («агент первым, сервер вторым» — он встраивает то, что лежит
+// в internal/agentbin/bin на момент своей сборки) не проверялся ничем, а промах
+// молчаливый и отложенный: сервер трое суток раздавал агента трёхдневной
+// давности, и обнаружилось это только когда тот отказался ставиться поверх
+// собственной службы.
+func warnStaleAgent() {
+	if !agentbin.Available() || agentbin.Compare() != agentbin.MatchStale {
+		return
+	}
+	agent, _ := agentbin.Info()
+	server, _ := agentbin.Self()
+	when := agent.Time.Local().Format("02.01.2006")
+
+	if winsvc.IsService() {
+		log.Printf("ВНИМАНИЕ: внутри сервера сборка агента из ревизии %s (%s), сам сервер — "+
+			"из %s. Собрано не в том порядке: пересоберите сначала агента, затем сервер.",
+			agent.Short(), when, server.Short())
+		return
+	}
+	fmt.Println()
+	fmt.Printf("  ВНИМАНИЕ: внутри сервера сборка агента из ревизии %s (%s),\n", agent.Short(), when)
+	fmt.Printf("  а сам сервер — из %s. Собрано не в том порядке.\n", server.Short())
+	fmt.Println("  Пересоберите:")
+	fmt.Println("      go build -o internal/agentbin/bin/agent.exe ./cmd/agent")
+	fmt.Println("      go build -o netadmin.exe ./cmd/netadmin")
 }
 
 // runBackups снимает копии базы по расписанию из настроек.

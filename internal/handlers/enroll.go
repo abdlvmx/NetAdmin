@@ -65,6 +65,12 @@ func (a *App) latestAgentBuild() (agentBuild, bool) {
 // логика, от которой зависит, какую версию получат новые машины.
 var agentEmbedded = agentbin.Bytes
 
+// agentBuildMatch — сверка встроенной сборки агента с самим сервером. Вынесена
+// переменной по той же причине, что и agentEmbedded: в тестовом окружении
+// встроенной сборки нет, а от результата сверки зависит, предупредит ли
+// страница настроек о собранном не в том порядке сервере.
+var agentBuildMatch = agentbin.Compare
+
 // AgentBinary — GET /agent.exe : сборка агента для установки.
 func (a *App) AgentBinary(w http.ResponseWriter, r *http.Request) {
 	b, ok := a.latestAgentBuild()

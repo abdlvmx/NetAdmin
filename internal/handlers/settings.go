@@ -42,6 +42,15 @@ type settingsData struct {
 	// загружена: без неё команда не сработает, и предлагать её нельзя.
 	EnrollCmd   string
 	AgentUpload bool
+	// Встроенная сборка агента собрана не из той ревизии, что сервер: значит,
+	// собирали в неверном порядке (сервер встраивает то, что лежит в
+	// internal/agentbin/bin на момент его сборки), и машины получат старьё.
+	// Показывается, только когда отдаётся именно встроенная сборка: загруженная
+	// в «Установку ПО» важнее, и тогда жаловаться не на что.
+	AgentBuildStale bool
+	AgentBuildRev   string
+	AgentBuildDate  string
+	ServerBuildRev  string
 	// Сетевые настройки: значения из config.json и то, что действует сейчас.
 	// Источник показывается, чтобы «задал, а не применилось» не превращалось
 	// в поиск вслепую — переменная окружения перекрывает настройку.
@@ -74,7 +83,15 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := config.Load()
-	_, hasAgentBuild := a.latestAgentBuild()
+	build, hasAgentBuild := a.latestAgentBuild()
+	agentStale := hasAgentBuild && build.Embedded && agentBuildMatch() == agentbin.MatchStale
+	var agentRev, agentDate, serverRev string
+	if agentStale {
+		ab, _ := agentbin.Info()
+		sb, _ := agentbin.Self()
+		agentRev, serverRev = ab.Short(), sb.Short()
+		agentDate = ab.Time.Local().Format("02.01.2006")
+	}
 	var backups []backup.Info
 	if dir, err := backupDir(cfg); err == nil {
 		backups = backup.List(dir)
@@ -99,10 +116,14 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		BackupDir:           cfg.BackupDir,
 		Backups:             backups,
 
-		ServerAddrs: localIPv4s(),
-		PickedAddr:  hostOnly(agentServerURL(r)),
-		EnrollCmd:   enrollCommand(agentServerURL(r), cfg.AgentToken),
-		AgentUpload: hasAgentBuild,
+		ServerAddrs:     localIPv4s(),
+		PickedAddr:      hostOnly(agentServerURL(r)),
+		EnrollCmd:       enrollCommand(agentServerURL(r), cfg.AgentToken),
+		AgentUpload:     hasAgentBuild,
+		AgentBuildStale: agentStale,
+		AgentBuildRev:   agentRev,
+		AgentBuildDate:  agentDate,
+		ServerBuildRev:  serverRev,
 
 		ListenAddr:           cfg.ListenAddr,
 		AllowSubnets:         cfg.AllowSubnets,
