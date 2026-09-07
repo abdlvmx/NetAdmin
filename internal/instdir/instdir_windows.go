@@ -9,11 +9,14 @@ import (
 	"path/filepath"
 	"unsafe"
 
+	"netadmin/internal/winsvc"
+
 	"golang.org/x/sys/windows"
 )
 
 // sddl — список доступа, который получает каталог установки.
 //
+//	O:BA             — владелец: встроенная группа «Администраторы»;
 //	D:PAI            — собственный список, наследование от родителя отключено;
 //	(A;OICI;FA;;;SY) — SYSTEM, полный доступ, наследуется файлами и папками;
 //	(A;OICI;FA;;;BA) — то же встроенной группе «Администраторы».
@@ -25,17 +28,15 @@ import (
 // разрешает BUILTIN\Users создавать файлы и подкаталоги, а CREATOR OWNER даёт
 // создателю полный доступ к созданному, — и всё это досталось бы каталогу
 // установки вместе с наследством.
-const sddl = "D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
-
-// ourFiles — по чему видно, что каталог оставила прежняя установка.
 //
-// Список нужен ровно для одного решения: чинить права существующему каталогу
-// или отказаться его трогать. Пустой каталог с наследованными правами — это не
-// «наша установка без прав», а тот самый случай, ради которого всё затевалось.
-var ourFiles = []string{
-	"netadmin.exe", "netadmin.db", "config.json",
-	"agent.exe", "agent_config.json", "agent_state.json",
-}
+// Владелец задаётся не для порядка. Владельцу Windows всегда неявно даёт
+// WRITE_DAC — право переписать список доступа, — и пока каталог принадлежит
+// постороннему, любой выставленный нами список он может отменить. Сменить же
+// владельца можно только на тот SID, который есть в собственном токене, а
+// группы «Администраторы» у обычного пользователя там нет: подделать такого
+// владельца он не может. Это и есть признак, по которому свой каталог
+// отличается от занятого заранее.
+const sddl = "O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 
 // Secure приводит каталог установки к состоянию «доступ только у SYSTEM и
 // администраторов» и возвращает true, если права пришлось чинить у уже
@@ -58,6 +59,26 @@ func Secure(dir string) (tightened bool, err error) {
 		return false, fmt.Errorf("каталог %s: %w", dir, err)
 	}
 
+	// Владелец проверяется раньше списка доступа и решает всё.
+	//
+	// Список подделать можно: тот, кто занял каталог до установщика, сам
+	// выставит на него ровно те записи, которые мы ищем, останется владельцем
+	// и потом вернёт себе доступ через WRITE_DAC. Владельца подделать нельзя,
+	// поэтому чужой каталог отвергается независимо от того, как выглядят права
+	// и что лежит внутри.
+	owner, name, err := ownerOf(dir)
+	if err != nil {
+		return false, fmt.Errorf("владелец каталога %s: %w", dir, err)
+	}
+	if !trustedOwner(owner) {
+		return false, fmt.Errorf(
+			"каталог %s уже существует и принадлежит %s, а не системе или администраторам.\n"+
+				"Так выглядит попытка занять его до установщика: владелец в любой момент вернёт "+
+				"себе полный доступ и подменит файл службы, работающей от SYSTEM.\n"+
+				"Посмотрите, что внутри, удалите или переименуйте каталог и повторите установку.",
+			dir, name)
+	}
+
 	closed, err := restricted(dir)
 	if err != nil {
 		return false, fmt.Errorf("права каталога %s: %w", dir, err)
@@ -65,24 +86,23 @@ func Secure(dir string) (tightened bool, err error) {
 	if closed {
 		return false, nil
 	}
-	if !ours(dir) {
-		return false, fmt.Errorf(
-			"каталог %s уже существует, открыт на запись обычным пользователям и не содержит "+
-				"ничего от прежней установки NetAdmin.\n"+
-				"Так выглядит попытка занять его до установщика: подменив файл службы, работающей "+
-				"от SYSTEM, обычный пользователь получил бы полные права на машину.\n"+
-				"Посмотрите, что внутри, удалите или переименуйте каталог и повторите установку.", dir)
-	}
 
 	dacl, _, err := sd.DACL()
 	if err != nil {
 		return false, fmt.Errorf("список доступа: %w", err)
 	}
-	// PROTECTED_DACL_SECURITY_INFORMATION — не просто записать список, но и
-	// отрезать наследование: без него унаследованные разрешения останутся.
+	admins, _, err := sd.Owner()
+	if err != nil {
+		return false, fmt.Errorf("владелец: %w", err)
+	}
+	// Владелец выставляется заодно с правами: приводим его к группе, чтобы
+	// каталог не зависел от того, какая учётная запись ставила прошлый раз.
+	// PROTECTED_DACL отрезает наследование: без него унаследованные разрешения
+	// остались бы.
 	if err := windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil, nil, dacl, nil); err != nil {
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|
+			windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		admins, nil, dacl, nil); err != nil {
 		return false, fmt.Errorf("не удалось закрыть доступ к каталогу %s: %w", dir, err)
 	}
 	return true, nil
@@ -157,6 +177,47 @@ func restricted(dir string) (bool, error) {
 	return true, nil
 }
 
+// ownerOf — владелец каталога и его читаемое имя для сообщения об отказе.
+func ownerOf(dir string) (*windows.SID, string, error) {
+	sd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return nil, "", err
+	}
+	sid, _, err := sd.Owner()
+	if err != nil {
+		return nil, "", err
+	}
+	return sid, ownerName(sid), nil
+}
+
+// ownerName — «DESKTOP\\user» там, где имя удалось разобрать, иначе сам SID:
+// человеку в отказе полезнее имя, но отказ не должен зависеть от того,
+// разрешается ли учётная запись.
+func ownerName(sid *windows.SID) string {
+	if account, domain, _, err := sid.LookupAccount(""); err == nil {
+		if domain != "" {
+			return domain + `\` + account
+		}
+		return account
+	}
+	return sid.String()
+}
+
+// trustedOwner — каталог принадлежит системе или встроенным администраторам.
+//
+// Обычный пользователь такого владельца не поставит: сменить владельца можно
+// только на SID из собственного токена, а группы «Администраторы» у него там
+// нет. Потому проверка и неподделываема — в отличие от списка доступа, который
+// владелец волен выставить любой.
+func trustedOwner(sid *windows.SID) bool {
+	trusted, err := trustedSIDs()
+	if err != nil {
+		return false // не смогли выяснить — значит не доверяем
+	}
+	return trustedSID(trusted, sid)
+}
+
 // trustedSIDs — те, кому каталог установки принадлежит по существу.
 func trustedSIDs() ([]*windows.SID, error) {
 	var out []*windows.SID
@@ -169,22 +230,37 @@ func trustedSIDs() ([]*windows.SID, error) {
 		}
 		out = append(out, sid)
 	}
+	if sid, ok := installerAccount(); ok {
+		out = append(out, sid)
+	}
 	return out, nil
+}
+
+// installerAccount — учётная запись, от имени которой идёт установка.
+//
+// Считается доверенным владельцем только у процесса с правами администратора.
+// Нужна потому, что владелец каталога, заведённого прошлой установкой, зависит
+// от политики машины «владелец объектов, создаваемых администраторами»: обычно
+// это группа, но может быть и конкретный администратор — и тогда без этой
+// оговорки установка отвергла бы собственный каталог вместе с базой внутри.
+//
+// Дыры это не открывает: обычный пользователь, занявший каталог заранее, не
+// станет тем, кто запускает установщик с правами, а тот, кто им становится,
+// и так имеет на машине всё.
+func installerAccount() (*windows.SID, bool) {
+	if !winsvc.Elevated() {
+		return nil, false
+	}
+	u, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return nil, false
+	}
+	return u.User.Sid, true
 }
 
 func trustedSID(trusted []*windows.SID, sid *windows.SID) bool {
 	for _, t := range trusted {
 		if sid.Equals(t) {
-			return true
-		}
-	}
-	return false
-}
-
-// ours — в каталоге лежит хоть что-то от прежней установки.
-func ours(dir string) bool {
-	for _, name := range ourFiles {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
 			return true
 		}
 	}

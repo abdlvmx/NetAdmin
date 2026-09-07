@@ -57,9 +57,8 @@ func aceSIDs(t *testing.T, dir string) []string {
 }
 
 // Каталог заводится закрытым: доступ только у SYSTEM (S-1-5-18) и встроенных
-// администраторов (S-1-5-32-544), наследование от C:\ProgramData отключено.
-// Именно наследование и было дырой: там BUILTIN\Users может создавать файлы,
-// а CREATOR OWNER отдаёт созданное создателю.
+// администраторов (S-1-5-32-544), наследование от %ProgramData% отключено,
+// а владельцем становится тот, кому каталог и должен принадлежать.
 func TestSecureCreatesDirectoryClosedToUsers(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "NetAdmin")
 	openUp(t, dir)
@@ -87,6 +86,14 @@ func TestSecureCreatesDirectoryClosedToUsers(t *testing.T) {
 	if closed, err := restricted(dir); err != nil || !closed {
 		t.Errorf("restricted(%s) = %v, %v; каталог должен опознаваться как закрытый", dir, closed, err)
 	}
+	owner, name, err := ownerOf(dir)
+	if err != nil {
+		t.Fatalf("владелец: %v", err)
+	}
+	if !trustedOwner(owner) {
+		t.Errorf("владельцем заведённого нами каталога стал %s — такой каталог "+
+			"следующая установка отвергла бы как чужой", name)
+	}
 }
 
 // Повторная установка поверх своего же каталога не должна сообщать, что чинила
@@ -107,39 +114,81 @@ func TestSecureOnClosedDirectoryChangesNothing(t *testing.T) {
 	}
 }
 
-// Каталог, занятый до установщика: существует, открыт на запись и пуст. Это и
-// есть атака — тот, кто занял место, остаётся владельцем и подменяет файл
-// службы, работающей от SYSTEM. Установка должна отказаться, а не «починить»
-// чужое место и поселиться в нём.
-func TestSecureRefusesDirectoryTakenBeforeInstall(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "NetAdmin")
-	if err := os.Mkdir(dir, 0o755); err != nil {
+// Чужой владелец не доверяется, как бы ни выглядели права.
+//
+// Это главная проверка пакета. Список доступа подделывается: тот, кто занял
+// каталог до установщика, сам выставит на него ровно те записи, которые мы
+// ищем. При этом он остаётся владельцем, а владельцу Windows всегда неявно
+// даёт WRITE_DAC — вернуть себе полный доступ и подменить файл службы,
+// работающей от SYSTEM, он сможет в любой момент после установки.
+func TestForeignOwnerIsNotTrusted(t *testing.T) {
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	_, err := Secure(dir)
-	if err == nil {
-		t.Fatal("установка в чужой открытый каталог должна отклоняться")
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Отказ обязан говорить, что делать: иначе человек упрётся в него и решит,
-	// что установщик сломан.
+	for _, sid := range []*windows.SID{system, admins} {
+		if !trustedOwner(sid) {
+			t.Errorf("%s должен считаться своим владельцем", sid)
+		}
+	}
+
+	// Обычный пользователь и встроенная группа «Пользователи» — не свои.
+	for _, s := range []string{"S-1-5-21-1111111111-2222222222-3333333333-1001", "S-1-5-32-545"} {
+		sid, err := windows.StringToSid(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if trustedOwner(sid) {
+			t.Errorf("%s принят как свой владелец — каталог, занятый до установщика, "+
+				"прошёл бы проверку", s)
+		}
+	}
+}
+
+// Каталог с правильными правами, но чужим владельцем — отказ. Тот самый обход
+// целиком: права выставлены ровно те, что ставим мы сами, и только владелец
+// выдаёт подделку.
+func TestSecureRefusesForeignOwnerDespiteCorrectACL(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "NetAdmin")
+	openUp(t, dir)
+	if _, err := Secure(dir); err != nil {
+		t.Fatalf("подготовка: %v", err)
+	}
+
+	// Владелец меняется на встроенную группу «Пользователи»: она есть в токене
+	// администратора, поэтому особых привилегий смена не требует, — а доверенной
+	// она не считается.
+	users, err := windows.CreateWellKnownSid(windows.WinBuiltinUsersSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION, users, nil, nil, nil); err != nil {
+		t.Skipf("сменить владельца в этом окружении не удалось: %v", err)
+	}
+
+	_, err = Secure(dir)
+	if err == nil {
+		t.Fatal("каталог с чужим владельцем принят, хотя права на нём выглядят правильно")
+	}
 	if !strings.Contains(err.Error(), "удалите или переименуйте") {
 		t.Errorf("в отказе нет продолжения о том, что делать: %v", err)
 	}
 }
 
-// Обновление поверх установки прежних версий, где права не выставлялись. Такой
-// каталог отличается от занятого чужаком тем, что в нём лежит наше: отказать
-// здесь значило бы сломать обновление всем, кто уже поставил продукт.
+// Обновление поверх установки прежних версий, где права не выставлялись.
+// Отказать здесь значило бы сломать обновление всем, кто уже поставил продукт:
+// каталог свой, просто открытый.
 func TestSecureTightensPreviousInstall(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "NetAdmin")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	openUp(t, dir)
-	if err := os.WriteFile(filepath.Join(dir, "netadmin.db"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 
 	tightened, err := Secure(dir)
 	if err != nil {
