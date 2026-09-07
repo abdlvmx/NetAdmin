@@ -459,26 +459,36 @@ func main() {
 	// как раньше, — циклом до принудительной остановки.
 	if winsvc.IsService() {
 		startServiceLog() // у службы нет консоли: без этого падение не оставит следов
-		if err := winsvc.Run(agentServiceName, func(stop <-chan struct{}) { run(stop) }); err != nil {
-			log.Fatalf("служба: %v", err)
+		// Ошибка уходит в журнал: у службы нет консоли, и это единственный след.
+		// Диспетчеру о неудаче сообщает сам winsvc.Run.
+		err := winsvc.Run(agentServiceName, func(stop <-chan struct{}) error { return run(stop) })
+		if err != nil {
+			log.Printf("служба остановлена с ошибкой: %v", err)
+			os.Exit(1)
 		}
 		return
 	}
-	run(nil)
+	if err := run(nil); err != nil {
+		fmt.Println("ОШИБКА:", err)
+		holdWindow()
+		os.Exit(1)
+	}
 }
 
 // run — рабочий цикл агента. Возвращается, когда закрывается stop (у службы) —
 // из консоли stop нулевой, и цикл не прерывается.
-func run(stop <-chan struct{}) {
+//
+// Отказ возвращается наверх, а не гасит процесс: под службой os.Exit не
+// оставляет диспетчеру ни отчёта, ни причины — в журнале только
+// «terminated unexpectedly», а действия восстановления дают цикл перезапусков.
+func run(stop <-chan struct{}) error {
 	log.Printf("NetAdmin agent %s → %s (настройки: %s)", agentVersion, serverURL, settingsSource)
 	cleanupOldBinary() // остаток прошлого самообновления
 	st := loadState()
 	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
 	if deviceToken == "" && token == "" {
-		log.Print("не задан ключ регистрации: запустите agent.exe двойным щелчком " +
+		return errors.New("не задан ключ регистрации: запустите agent.exe двойным щелчком " +
 			"и введите адрес сервера и код, либо задайте NETADMIN_AGENT_TOKEN")
-		wincon.Hold()
-		os.Exit(1)
 	}
 	var lastSent map[string]any
 	var lastHB time.Time
@@ -600,7 +610,7 @@ func run(stop <-chan struct{}) {
 		select {
 		case <-stop:
 			log.Println("остановка агента")
-			return
+			return nil
 		case <-time.After(pollInterval):
 		}
 	}

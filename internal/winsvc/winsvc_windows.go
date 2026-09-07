@@ -196,12 +196,19 @@ func State(name string) (string, error) {
 
 // Run выполняет serve под управлением диспетчера служб: serve обязан вернуться,
 // когда закроется переданный ему канал.
-func Run(name string, serve func(stop <-chan struct{})) error {
-	return svc.Run(name, &handler{serve: serve})
+func Run(name string, serve func(stop <-chan struct{}) error) error {
+	h := &handler{serve: serve}
+	if err := svc.Run(name, h); err != nil {
+		return err
+	}
+	return h.err
 }
 
 type handler struct {
-	serve func(stop <-chan struct{})
+	serve func(stop <-chan struct{}) error
+	// err — с чем завершился serve. Пишется в горутине, читается после
+	// возврата из Execute, то есть после её завершения: гонки нет.
+	err error
 }
 
 func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
@@ -211,7 +218,7 @@ func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.serve(stop)
+		h.err = h.serve(stop)
 	}()
 
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
@@ -228,10 +235,11 @@ func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 				return false, 0
 			}
 		case <-done:
-			// serve завершился сам — это авария, сообщаем ненулевой код,
-			// чтобы сработали действия восстановления
+			// serve завершился сам, не дожидаясь команды, — это авария.
+			// Код помечается специфичным для службы: иначе диспетчер толкует
+			// единицу как ERROR_INVALID_FUNCTION и пишет в журнал не про то.
 			status <- svc.Status{State: svc.StopPending}
-			return false, 1
+			return true, 1
 		}
 	}
 }

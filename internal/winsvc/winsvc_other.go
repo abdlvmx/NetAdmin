@@ -15,4 +15,4 @@ func Restart(string) error   { return ErrUnsupported }
 
 func State(string) (string, error) { return "", ErrUnsupported }
 
-func Run(string, func(stop <-chan struct{})) error { return ErrUnsupported }
+func Run(string, func(stop <-chan struct{}) error) error { return ErrUnsupported }

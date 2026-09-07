@@ -49,7 +49,9 @@ func main() {
 	switch {
 	case *restart:
 		if err := restartServer(); err != nil {
-			log.Fatalf("перезапуск службы: %v", err)
+			fmt.Println("ОШИБКА:", err)
+			holdWindow()
+			os.Exit(1)
 		}
 		return
 	case *install, *uninstall:
@@ -65,7 +67,9 @@ func main() {
 		return
 	case *status:
 		if err := printServerStatus(); err != nil {
-			log.Fatalf("состояние службы: %v", err)
+			fmt.Println("ОШИБКА:", err)
+			holdWindow()
+			os.Exit(1)
 		}
 		return
 	}
@@ -74,10 +78,13 @@ func main() {
 	// Ctrl+C, и пишем в файл — консоли у службы нет и вывод иначе пропадает.
 	if winsvc.IsService() {
 		startServiceLog()
-		if err := winsvc.Run(serviceName, func(stop <-chan struct{}) {
-			serve(*demoMode, stop)
+		// Ошибка уходит в журнал: консоли у службы нет, и это единственный след
+		// причины. Диспетчеру о неудаче сообщает сам winsvc.Run.
+		if err := winsvc.Run(serviceName, func(stop <-chan struct{}) error {
+			return serve(*demoMode, stop)
 		}); err != nil {
-			log.Fatalf("служба: %v", err)
+			log.Printf("служба остановлена с ошибкой: %v", err)
+			os.Exit(1)
 		}
 		return
 	}
@@ -106,7 +113,13 @@ func main() {
 		<-sig
 		close(stop)
 	}()
-	serve(*demoMode, stop)
+	// Отказ на запуске показывается человеку и держит окно открытым: при
+	// двойном щелчке сообщение иначе исчезает раньше, чем его прочитают.
+	if err := serve(*demoMode, stop); err != nil {
+		fmt.Println("ОШИБКА:", err)
+		holdWindow()
+		os.Exit(1)
+	}
 }
 
 // askOnStart — показывать ли выбор при запуске.
@@ -171,14 +184,20 @@ func firewallFromFlags(yes, no bool) firewallChoice {
 
 // serve поднимает сервер со всеми фоновыми задачами и работает, пока не
 // закроется stop. Вынесено из main, чтобы одно и то же тело обслуживало и
+//
+// Возвращает ошибку вместо того, чтобы гасить процесс: под службой log.Fatalf
+// означает os.Exit прямо из горутины — диспетчер не получает ни отчёта, ни
+// кода, в журнале остаётся «terminated unexpectedly», а настроенные действия
+// восстановления загоняют службу в цикл перезапусков без единой строки о
+// причине.
 // консольный запуск, и службу Windows.
-func serve(demoMode bool, stop <-chan struct{}) {
+func serve(demoMode bool, stop <-chan struct{}) error {
 	// Демо-режим готовится до открытия базы: каталог данных выбирается по
 	// переменной окружения, и подменить его позже уже нельзя.
 	if demoMode {
 		dir, err := os.MkdirTemp("", "netadmin-demo-")
 		if err != nil {
-			log.Fatalf("демо-режим: %v", err)
+			return fmt.Errorf("демо-режим: не удалось создать временный каталог: %w", err)
 		}
 		// удаляется последним: defer database.Close() зарегистрирован ниже и
 		// сработает раньше, иначе Windows не отдаст файл открытой базы
@@ -197,12 +216,14 @@ func serve(demoMode bool, stop <-chan struct{}) {
 
 	database, err := db.Open(config.DBPath())
 	if err != nil {
-		log.Fatalf("db open: %v", err)
+		return fmt.Errorf("не удалось открыть базу %s: %w.\n"+
+			"Проверьте, что каталог доступен на запись и файл не занят другой копией сервера.",
+			config.DBPath(), err)
 	}
 	defer database.Close()
 
 	if err := db.InitSchema(database); err != nil {
-		log.Fatalf("db schema: %v", err)
+		return fmt.Errorf("не удалось подготовить схему базы: %w", err)
 	}
 
 	// материализуем config.json и токен агента при первом запуске
@@ -210,7 +231,7 @@ func serve(demoMode bool, stop <-chan struct{}) {
 
 	if demoMode {
 		if err := demo.Seed(database); err != nil {
-			log.Fatalf("демо-режим, наполнение базы: %v", err)
+			return fmt.Errorf("демо-режим, наполнение базы: %w", err)
 		}
 	}
 
@@ -240,7 +261,9 @@ func serve(demoMode bool, stop <-chan struct{}) {
 	allowSet := cfg.AllowSubnetsSetting()
 	allow, err := netaccess.Parse(allowSet.Value)
 	if err != nil {
-		log.Fatalf("разрешённые подсети (%s): %v", allowSet.Source, err)
+		return fmt.Errorf("разрешённые подсети (источник: %s): %w.\n"+
+			"Сервер не запускается, пока значение неверно: исправьте allow_subnets в "+
+			"config.json или уберите переменную NETADMIN_ALLOW.", allowSet.Source, err)
 	}
 
 	app := &handlers.App{
@@ -362,16 +385,28 @@ func serve(demoMode bool, stop <-chan struct{}) {
 		IdleTimeout:    2 * time.Minute,
 		MaxHeaderBytes: 1 << 20,
 	}
+	// Ошибка прослушивания приходит из горутины. Раньше она гасила процесс
+	// целиком: log.Fatalf — это os.Exit, при котором не закрывается база и
+	// теряется всё, что ingest не успел записать. Теперь она возвращается
+	// наверх обычным путём, через остановку.
+	failed := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen: %v", err)
+			failed <- fmt.Errorf("не удалось занять адрес %s: %w.\n"+
+				"Порт занят другой программой или другой копией NetAdmin. Освободите его "+
+				"или задайте другой адрес: listen_addr в config.json.", listenAddr, err)
 		}
 	}()
 
 	// Корректная остановка. Без неё рвались текущие запросы, а метрики из
 	// буфера ingest пропадали: они пишутся пачками и обычный перезапуск
 	// сервера терял всё, что не успело уйти в базу.
-	<-stop
+	var failure error
+	select {
+	case <-stop:
+	case failure = <-failed:
+		log.Printf("аварийная остановка: %v", failure)
+	}
 
 	log.Print("остановка: дожидаюсь текущих запросов и дописываю метрики...")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -381,6 +416,7 @@ func serve(demoMode bool, stop <-chan struct{}) {
 	}
 	app.Ingest.Close()
 	log.Print("остановлено")
+	return failure
 }
 
 // runBackups снимает копии базы по расписанию из настроек.
