@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -286,6 +287,71 @@ func redirectAfter(r *http.Request, def string) string {
 	return def
 }
 
+// deviceChildTables — таблицы, строки которых принадлежат устройству и без
+// него смысла не имеют.
+//
+// На metrics_history и events стоят внешние ключи, поэтому «просто DELETE
+// FROM devices» на устройстве с историей срывался: при групповой операции
+// сообщением «не удалось применить действие», при удалении по одному — молча,
+// и устройство оставалось на месте. Остальные таблицы внешних ключей не имеют,
+// и их строки оставались висеть навсегда.
+var deviceChildTables = []string{
+	"metrics_history", "events", "software", "device_changes",
+	"services", "autoruns", "scheduled_tasks", "disks",
+	"agent_tasks", "metrics_rollup",
+}
+
+// deleteDevices удаляет устройства вместе со всем, что к ним привязано.
+// Возвращает число удалённых устройств.
+//
+// Всё одной транзакцией: наполовину удалённое устройство — без истории, но в
+// списке — хуже, чем неудаленное.
+func (a *App) deleteDevices(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	marks := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+
+	tx, err := a.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback() // после успешного Commit ничего не делает
+
+	for _, t := range deviceChildTables {
+		if _, err := tx.Exec("DELETE FROM "+t+" WHERE device_id IN ("+marks+")", args...); err != nil {
+			return 0, fmt.Errorf("%s: %w", t, err)
+		}
+	}
+
+	// Связи топологии смотрят на устройство с обеих сторон.
+	both := append(append([]any{}, args...), args...)
+	if _, err := tx.Exec("DELETE FROM topology_links WHERE parent_device_id IN ("+marks+
+		") OR child_device_id IN ("+marks+")", both...); err != nil {
+		return 0, fmt.Errorf("topology_links: %w", err)
+	}
+
+	// Заявку писал человек, и к железу она не сводится: устройство из неё
+	// убираем, саму заявку оставляем.
+	if _, err := tx.Exec("UPDATE tickets SET device_id=NULL WHERE device_id IN ("+marks+")", args...); err != nil {
+		return 0, fmt.Errorf("tickets: %w", err)
+	}
+
+	res, err := tx.Exec("DELETE FROM devices WHERE id IN ("+marks+")", args...)
+	if err != nil {
+		return 0, fmt.Errorf("devices: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // DeleteDevice — POST /devices/{id}/delete (только admin).
 func (a *App) DeleteDevice(w http.ResponseWriter, r *http.Request) {
 	user := auth.CurrentUser(a.DB, r)
@@ -296,9 +362,14 @@ func (a *App) DeleteDevice(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	var host string
 	_ = a.DB.QueryRow("SELECT hostname FROM devices WHERE id=?", id).Scan(&host)
-	if _, err := a.DB.Exec("DELETE FROM devices WHERE id=?", id); err == nil {
-		auth.LogAction(a.DB, user.ID, "delete_device", host, "")
+	if _, err := a.deleteDevices([]int64{id}); err != nil {
+		// Прежде ошибка проглатывалась: устройство оставалось на месте, а
+		// человек видел обычный возврат к списку и считал, что удалил.
+		log.Printf("удаление устройства %d: %v", id, err)
+		http.Redirect(w, r, "/devices?error=Не+удалось+удалить+устройство", http.StatusSeeOther)
+		return
 	}
+	auth.LogAction(a.DB, user.ID, "delete_device", host, "")
 	http.Redirect(w, r, "/devices", http.StatusSeeOther)
 }
 
@@ -430,7 +501,17 @@ func (a *App) BulkDevices(w http.ResponseWriter, r *http.Request) {
 		query = "UPDATE devices SET critical=? WHERE id IN (" + marks + ")"
 		args = append(args, boolParam(value))
 	case "delete":
-		query = "DELETE FROM devices WHERE id IN (" + marks + ")"
+		// Удаление идёт своим путём: у устройства есть история и инвентарь,
+		// и снести одну строку из devices недостаточно (см. deleteDevices).
+		n, err := a.deleteDevices(ids)
+		if err != nil {
+			log.Printf("групповое удаление: %v", err)
+			http.Redirect(w, r, "/devices?error=Не+удалось+удалить+устройства", http.StatusSeeOther)
+			return
+		}
+		auth.LogAction(a.DB, user.ID, "devices_bulk_delete", "", strconv.FormatInt(n, 10)+" устройств")
+		http.Redirect(w, r, "/devices?message="+url.QueryEscape(bulkMessage("delete", n)), http.StatusSeeOther)
+		return
 	default:
 		http.Redirect(w, r, "/devices?error=Неизвестное+действие", http.StatusSeeOther)
 		return
