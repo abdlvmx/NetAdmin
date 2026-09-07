@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -303,18 +305,24 @@ func localAgentInstaller() func(serverURL, token string) (string, error) {
 		return nil
 	}
 	return func(serverURL, token string) (string, error) {
-		data, _, ok := agentbin.Bytes()
+		data, sum, ok := agentbin.Bytes()
 		if !ok {
 			return "", fmt.Errorf("этот сервер собран без встроенного агента")
 		}
 
-		tmp := filepath.Join(os.TempDir(), "netadmin-agent-setup.exe")
-		if err := os.WriteFile(tmp, data, 0o700); err != nil {
-			return "", fmt.Errorf("запись файла агента: %w", err)
+		// Каталог установки закрыт для всех, кроме SYSTEM и администраторов —
+		// туда же через секунду встанет и сам агент.
+		dir := installDir()
+		if _, err := instdir.Secure(dir); err != nil {
+			return "", err
 		}
-		defer os.Remove(tmp)
+		exe, cleanup, err := stageAgent(dir, data, sum)
+		if err != nil {
+			return "", err
+		}
+		defer cleanup()
 
-		out, err := exec.Command(tmp, "-install", "-server="+serverURL, "-token="+token).CombinedOutput()
+		out, err := exec.Command(exe, "-install", "-server="+serverURL, "-token="+token).CombinedOutput()
 		text := strings.TrimSpace(string(out))
 		if err != nil {
 			if text == "" {
@@ -324,4 +332,65 @@ func localAgentInstaller() func(serverURL, token string) (string, error) {
 		}
 		return text, nil
 	}
+}
+
+// stageAgent кладёт сборку агента в каталог, куда не может писать обычный
+// пользователь, и сверяет записанное перед запуском. Возвращает путь и уборку.
+//
+// Раньше файл писался в os.TempDir() под постоянным именем. У службы это
+// C:\Windows\Temp — каталог, доступный на запись всем: занятый заранее файл
+// остаётся во владении того, кто его создал, и подменить содержимое между
+// записью и запуском ему ничто не мешало. Запускается же файл от LocalSystem.
+func stageAgent(dir string, data []byte, sum string) (string, func(), error) {
+	work, err := os.MkdirTemp(dir, "agent-setup-")
+	if err != nil {
+		return "", nil, fmt.Errorf("каталог для установки агента: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(work) }
+
+	exe := filepath.Join(work, "agent.exe")
+	// O_EXCL: имя каждый раз новое, и файла с ним быть не должно. Если он всё
+	// же есть — это не наш файл, и открывать его на запись нельзя.
+	f, err := os.OpenFile(exe, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("файл агента: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("запись файла агента: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("запись файла агента: %w", err)
+	}
+
+	// Сумма уже посчитана в agentbin и прежде просто отбрасывалась. Между
+	// записью и запуском файл меняет не только злоумышленник: антивирус вправе
+	// вырезать или подменить его, и без проверки это выглядело бы как
+	// необъяснимый отказ установки.
+	if err := verifyFileSum(exe, sum); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return exe, cleanup, nil
+}
+
+// verifyFileSum сверяет SHA-256 файла с ожидаемой.
+func verifyFileSum(path, want string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("проверка файла агента: %w", err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("проверка файла агента: %w", err)
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != want {
+		return fmt.Errorf("файл агента не совпал с контрольной суммой: получено %s, ожидалось %s.\n"+
+			"Файл изменился между записью и запуском — проверьте антивирус и повторите.", got, want)
+	}
+	return nil
 }
