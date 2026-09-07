@@ -37,8 +37,19 @@ type settingsData struct {
 	// какой вписать в установщик.
 	ServerAddrs []serverAddr
 	PickedAddr  string
-	Message     string
-	Error       string
+	// Сетевые настройки: значения из config.json и то, что действует сейчас.
+	// Источник показывается, чтобы «задал, а не применилось» не превращалось
+	// в поиск вслепую — переменная окружения перекрывает настройку.
+	ListenAddr      string
+	AllowSubnets    string
+	ListenEffective config.NetworkSetting
+	AllowEffective  config.NetworkSetting
+	// PendingRestore — восстановление подготовлено и ждёт перезапуска.
+	PendingRestore bool
+	// CanRestart — сервер умеет перезапустить себя сам (установлен службой).
+	CanRestart bool
+	Message    string
+	Error      string
 }
 
 // backupDir — каталог копий по текущим настройкам.
@@ -80,6 +91,13 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 
 		ServerAddrs: localIPv4s(),
 		PickedAddr:  hostOnly(agentServerURL(r)),
+
+		ListenAddr:      cfg.ListenAddr,
+		AllowSubnets:    cfg.AllowSubnets,
+		ListenEffective: cfg.ListenAddrSetting(),
+		AllowEffective:  cfg.AllowSubnetsSetting(),
+		PendingRestore:  backup.Pending(config.DBPath()),
+		CanRestart:      a.Restart != nil,
 
 		Message: r.URL.Query().Get("message"),
 		Error:   r.URL.Query().Get("error"),

@@ -22,6 +22,10 @@ type App struct {
 	// Demo — режим витрины (`netadmin -demo`): активные действия в сети
 	// запрещены, чтобы показ продукта не трогал сеть смотрящего.
 	Demo bool
+	// Restart перезапускает сервер, если это умеет текущий способ запуска
+	// (служба Windows). nil означает, что перезапустить должен человек, —
+	// интерфейс тогда показывает, что именно сделать.
+	Restart func() error
 }
 
 // Routes собирает маршруты приложения (с security-обёрткой).
@@ -97,6 +101,11 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/helpdesk", a.UpdateHelpdesk)
 	mux.HandleFunc("POST /settings/backup", a.UpdateBackup)
 	mux.HandleFunc("POST /settings/backup/now", a.BackupNow)
+	// Восстановление применяется при следующем запуске — см. netsettings.go
+	mux.HandleFunc("POST /settings/backup/restore", a.RestoreBackup)
+	mux.HandleFunc("POST /settings/backup/restore/cancel", a.CancelRestore)
+	mux.HandleFunc("POST /settings/network", a.UpdateNetwork)
+	mux.HandleFunc("POST /settings/restart", a.RestartServer)
 
 	// Мониторинг сервисов (HTTP/TCP/DNS/…)
 	mux.HandleFunc("GET /monitoring", a.ServiceMonitorPage)
