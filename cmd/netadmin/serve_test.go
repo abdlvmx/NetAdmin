@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"netadmin/internal/config"
 )
 
 // Занятый адрес не должен гасить процесс.
@@ -52,5 +54,37 @@ func TestServeReportsBusyAddressInsteadOfExiting(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("serve не вернулся: ошибка прослушивания до него не дошла")
+	}
+}
+
+// Фоновая работа должна прекращаться вместе с serve.
+//
+// Пока serve заканчивалась вместе с процессом, никого не волновало, что тикеры
+// её переживают. Теперь она возвращается, defer закрывает базу — и переживший
+// её тикер продолжает ходить в закрытую базу до конца жизни процесса.
+func TestBackupsStopWithServe(t *testing.T) {
+	dir, err := os.MkdirTemp("", "netadmin-backups-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	t.Setenv("NETADMIN_DATA_DIR", dir)
+
+	// Расписание выключено, поэтому база в цикле не нужна и не трогается.
+	cfg := config.Load()
+	cfg.BackupIntervalHours = 0
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() { defer close(done); runBackups(nil, stop) }()
+
+	close(stop)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runBackups не заметила остановки: фоновая работа переживает serve")
 	}
 }

@@ -487,8 +487,9 @@ func run(stop <-chan struct{}) error {
 	st := loadState()
 	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
 	if deviceToken == "" && token == "" {
-		return errors.New("не задан ключ регистрации: запустите agent.exe двойным щелчком " +
-			"и введите адрес сервера и код, либо задайте NETADMIN_AGENT_TOKEN")
+		// Ключ сам не появится: перезапуск службы ничего не изменит.
+		return winsvc.Permanent(errors.New("не задан ключ регистрации: запустите agent.exe " +
+			"двойным щелчком и введите адрес сервера и код, либо задайте NETADMIN_AGENT_TOKEN"))
 	}
 	var lastSent map[string]any
 	var lastHB time.Time

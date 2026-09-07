@@ -14,6 +14,30 @@ import "errors"
 // ErrUnsupported возвращается вне Windows.
 var ErrUnsupported = errors.New("службы доступны только в Windows")
 
+// Permanent помечает отказ, который перезапуск не вылечит: неверная настройка,
+// отсутствующий ключ регистрации. Служба, вернувшая такую ошибку,
+// останавливается штатно — иначе действия восстановления поднимали бы её раз в
+// минуту до вмешательства человека, с одной и той же записью в журнале.
+//
+// Пометка не трогает текст: он уже написан для человека, и приписка про
+// перезапуск в нём лишняя.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return permanent{err}
+}
+
+// IsPermanent — отказ помечен как неисправимый перезапуском.
+func IsPermanent(err error) bool {
+	var p permanent
+	return errors.As(err, &p)
+}
+
+type permanent struct{ error }
+
+func (p permanent) Unwrap() error { return p.error }
+
 // Config описывает регистрируемую службу.
 type Config struct {
 	Name        string   // системное имя (без пробелов)

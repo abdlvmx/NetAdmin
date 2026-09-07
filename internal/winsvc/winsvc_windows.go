@@ -92,7 +92,10 @@ func Install(c Config) error {
 	if err := s.Start(); err != nil {
 		return fmt.Errorf("запуск службы: %w", err)
 	}
-	return nil
+	// Start возвращается, как только команду принял диспетчер, — это ещё не
+	// «работает». Служба, упавшая на старте, без этой проверки давала бы
+	// установщику повод напечатать «установлена и запущена» про мёртвую.
+	return waitRunning(s)
 }
 
 // Uninstall останавливает и удаляет службу. Отсутствие службы ошибкой не
@@ -211,8 +214,33 @@ type handler struct {
 	err error
 }
 
+// startGrace — сколько ждать, прежде чем объявить службу запущенной.
+//
+// Всё, что падает на старте, падает быстро; всё, что за это время не упало,
+// считается запустившимся. Диспетчер ждёт дольше (см. WaitHint), так что
+// пауза ничем не рискует.
+const startGrace = 3 * time.Second
+
+// exitCode переводит исход serve в то, что диспетчер поймёт.
+//
+// Постоянная ошибка — неверная настройка, отсутствующий ключ регистрации —
+// это не авария: перезапуск её не вылечит, а действия восстановления повторяют
+// последнее из них бесконечно, и служба поднималась бы раз в минуту с одной и
+// той же записью в журнале. Поэтому такая остановка объявляется штатной, и
+// восстановление не срабатывает; чинить — человеку, причина уже в журнале.
+func (h *handler) exitCode() (bool, uint32) {
+	if h.err == nil || IsPermanent(h.err) {
+		return false, 0
+	}
+	// Код помечается специфичным для службы: иначе диспетчер толкует единицу
+	// как ERROR_INVALID_FUNCTION и пишет в журнал не про то.
+	return true, 1
+}
+
 func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
-	status <- svc.Status{State: svc.StartPending}
+	// WaitHint говорит диспетчеру, сколько ждать: без него он торопится и
+	// объявляет запуск неудавшимся раньше, чем поднимется база.
+	status <- svc.Status{State: svc.StartPending, WaitHint: uint32(startGrace/time.Millisecond) + 5000}
 
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -221,6 +249,17 @@ func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 		h.err = h.serve(stop)
 	}()
 
+	// Запуск объявляется не сразу.
+	//
+	// Отказы на старте — занятый порт, недоступная база, неверные настройки —
+	// случаются в первые миллисекунды. Объявив Running раньше, мы сообщали
+	// диспетчеру об успешном запуске службы, которая уже умерла: sc start и
+	// установщик рапортовали успех, а в журнале следом шла остановка.
+	select {
+	case <-done:
+		return h.exitCode()
+	case <-time.After(startGrace):
+	}
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for {
 		select {
@@ -235,13 +274,35 @@ func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 				return false, 0
 			}
 		case <-done:
-			// serve завершился сам, не дожидаясь команды, — это авария.
-			// Код помечается специфичным для службы: иначе диспетчер толкует
-			// единицу как ERROR_INVALID_FUNCTION и пишет в журнал не про то.
+			// serve завершился сам, не дожидаясь команды.
 			status <- svc.Status{State: svc.StopPending}
-			return true, 1
+			return h.exitCode()
 		}
 	}
+}
+
+// waitRunning дожидается, пока служба действительно заработает.
+//
+// Отказ на старте выглядит как остановка сразу после запуска: диспетчер
+// переводит службу в Stopped, и это единственный способ узнать о нём со
+// стороны. Причина к этому моменту уже в журнале службы — консоли у неё нет.
+func waitRunning(s *mgr.Service) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := s.Query()
+		if err != nil {
+			return fmt.Errorf("состояние службы: %w", err)
+		}
+		switch st.State {
+		case svc.Running:
+			return nil
+		case svc.Stopped:
+			return fmt.Errorf("служба запустилась и сразу остановилась.\n" +
+				"Причина записана в журнал службы — откройте его и посмотрите последнюю строку.")
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return fmt.Errorf("служба не запустилась за 30 секунд")
 }
 
 // stop останавливает службу и дожидается фактической остановки: сразу после

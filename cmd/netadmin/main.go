@@ -252,6 +252,10 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 		}
 	}
 
+	// Все фоновые задачи ниже смотрят на stop. Без этого они переживали serve:
+	// та возвращается, defer закрывает базу — и тикеры продолжают ходить в
+	// закрытую базу. Пока serve заканчивалась вместе с процессом, этого не было
+	// видно, но она больше не заканчивается процессом.
 	// фоновая задача: авто-offline устройств с агентом по таймауту heartbeat
 	go func() {
 		tick := func() {
@@ -266,8 +270,13 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 		tick()
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
-		for range t.C {
-			tick()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				tick()
+			}
 		}
 	}()
 
@@ -278,9 +287,11 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 	allowSet := cfg.AllowSubnetsSetting()
 	allow, err := netaccess.Parse(allowSet.Value)
 	if err != nil {
-		return fmt.Errorf("разрешённые подсети (источник: %s): %w.\n"+
+		// Перезапуском это не лечится: значение в файле не изменится само,
+		// а действия восстановления иначе поднимали бы службу раз в минуту.
+		return winsvc.Permanent(fmt.Errorf("разрешённые подсети (источник: %s): %w.\n"+
 			"Сервер не запускается, пока значение неверно: исправьте allow_subnets в "+
-			"config.json или уберите переменную NETADMIN_ALLOW.", allowSet.Source, err)
+			"config.json или уберите переменную NETADMIN_ALLOW.", allowSet.Source, err))
 	}
 
 	app := &handlers.App{
@@ -309,8 +320,13 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 		go func() {
 			t := time.NewTicker(time.Minute)
 			defer t.Stop()
-			for range t.C {
-				app.CheckCritical()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-t.C:
+					app.CheckCritical()
+				}
 			}
 		}()
 
@@ -319,7 +335,12 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 			var lastDeep, lastFast = time.Now(), time.Now()
 			t := time.NewTicker(time.Minute)
 			defer t.Stop()
-			for range t.C {
+			for {
+				select {
+				case <-stop:
+					return
+				case <-t.C:
+				}
 				app.DiscoverPassive() // пассивное обнаружение из ARP-кэша (всегда)
 				app.RunDueChecks()    // проверки сервисов по интервалу (всегда)
 				app.RunDueSNMP()      // опрос SNMP-устройств по интервалу (всегда)
@@ -388,7 +409,7 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 	// Резервные копии запускаются после приветствия: первая снимается сразу,
 	// и её строка иначе падала бы человеку прямо посреди приветствия.
 	if !demoMode {
-		go runBackups(database)
+		go runBackups(database, stop)
 	}
 
 	srv := &http.Server{
@@ -473,10 +494,18 @@ func warnStaleAgent() {
 // Отсчёт ведётся от времени самой свежей копии в каталоге, а не от запуска
 // сервера: иначе перезапуск сдвигал бы расписание, и при частых перезапусках
 // копия не снималась бы никогда.
-func runBackups(d *sql.DB) {
+func runBackups(d *sql.DB, stop <-chan struct{}) {
 	t := time.NewTicker(10 * time.Minute)
 	defer t.Stop()
 	for {
+		// Проверка в начале круга, а не только в конце: первая копия снимается
+		// сразу при входе, и без неё она успевала уйти в уже закрытую базу —
+		// строкой «sql: database is closed» в журнале на прощание.
+		select {
+		case <-stop:
+			return
+		default:
+		}
 		cfg := config.Load()
 		if cfg.BackupIntervalHours > 0 {
 			dir, err := backup.Dir(config.DataDir(), cfg.BackupDir)
@@ -496,7 +525,11 @@ func runBackups(d *sql.DB) {
 				}
 			}
 		}
-		<-t.C
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+		}
 	}
 }
 
