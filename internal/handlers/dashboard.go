@@ -19,6 +19,14 @@ type dashStats struct {
 	DevicesOnlinePct                            int
 	EmployeesTotal                              int
 	AlertsTotal                                 int
+	// Покрытие агентами. Отфильтровать машины без агента страница устройств
+	// умела и раньше, а ответить «сколько их всего и сколько осталось» —
+	// только счётом строк глазами.
+	DevicesWithAgent, DevicesNoAgent int
+	AgentCoveragePct                 int
+	// Найденные в сети хосты, ещё не заведённые устройствами: для раскатки
+	// это такая же цель, но живут они на другой странице.
+	DiscoveredNew int
 }
 
 type donutData struct {
@@ -53,13 +61,9 @@ type dashData struct {
 }
 
 // Dashboard — GET /dashboard.
-func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
-	user := auth.CurrentUser(a.DB, r)
-	if user == nil {
-		http.Redirect(w, r, "/login", http.StatusFound)
-		return
-	}
-
+// dashboardStats считает сводку для плиток. Вынесено из обработчика, чтобы
+// счёт проверялся тестом, а не только глазами на живой базе.
+func (a *App) dashboardStats() dashStats {
 	var s dashStats
 	q := func(dest *int, query string) { _ = a.DB.QueryRow(query).Scan(dest) }
 	q(&s.UsersTotal, "SELECT COUNT(*) FROM users")
@@ -71,6 +75,21 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 	q(&s.AlertsTotal, `SELECT COUNT(*) FROM devices
 		WHERE status='offline' OR cpu_usage>=90 OR ram_usage>=90 OR disk_usage>=90
 		   OR (last_seen IS NOT NULL AND last_seen < datetime('now','-10 minutes'))`)
+	q(&s.DevicesWithAgent, "SELECT COUNT(*) FROM devices WHERE COALESCE(agent_token,'')<>''")
+	q(&s.DiscoveredNew, "SELECT COUNT(*) FROM discovery_queue WHERE status='new'")
+	s.DevicesNoAgent = s.DevicesTotal - s.DevicesWithAgent
+	s.AgentCoveragePct = pct(s.DevicesWithAgent, s.DevicesTotal)
+	return s
+}
+
+func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	s := a.dashboardStats()
 	s.DevicesOnlinePct = pct(s.DevicesOnline, s.DevicesTotal)
 
 	data := dashData{
