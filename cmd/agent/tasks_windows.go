@@ -5,7 +5,9 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -28,11 +30,43 @@ func runTask(kind, payload string) (status, output string, code int) {
 		return runLibraryCommand(payload)
 	case "install":
 		return installPackage(payload)
+	case "check":
+		return runSelfCheck()
 	case "selfupdate":
 		return selfUpdate(payload)
 	default:
 		return "failed", "неизвестная задача: " + kind, 1
 	}
+}
+
+// runSelfCheck выполняет самодиагностику агента и возвращает её отчёт целиком.
+//
+// Отдельным процессом, а не вызовом runCheck прямо здесь: проверка перечитывает
+// состояние и переприсваивает глобальные deviceToken и deviceID, которыми в это
+// же время пользуется рабочий цикл, — в одном процессе это гонка. Заодно отчёт
+// получается ровно тем, что увидел бы человек, запустивший agent.exe -check
+// руками: одна проверка, а не две расходящиеся.
+//
+// Ненулевой код — это найденные проблемы, а не сорванная задача: диагностика
+// отработала и ответила. Он возвращается как есть, чтобы на сервере было видно,
+// чем она кончилась.
+func runSelfCheck() (string, string, int) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "failed", "не удалось определить путь к агенту: " + err.Error(), 1
+	}
+	cmd := exec.Command(exe, "-check")
+	hideWindow(cmd)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err = cmd.Run()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		return "failed", "самодиагностика не запустилась: " + err.Error(), 1
+	}
+	return "done", strings.TrimSpace(out.String()), code
 }
 
 // runShutdown планирует перезагрузку (/r) или выключение (/s) с предупреждением

@@ -47,6 +47,9 @@
     <button class="btn btn-ghost" data-act="power" data-power="reboot"><svg class="ico ico-sm"><use href="#i-restart"/></svg> Перезагрузить</button>
     <button class="btn btn-ghost" data-act="power" data-power="shutdown"><svg class="ico ico-sm"><use href="#i-power"/></svg> Выключить</button>
     <button class="btn btn-ghost" data-act="power" data-power="logoff"><svg class="ico ico-sm"><use href="#i-exit"/></svg> Выйти</button>
+    {{if .Device.HasToken}}<button class="btn btn-ghost" data-act="selfcheck"
+      title="Спросить агента, что у него не так: тот же agent.exe -check, но не выходя с этой страницы">
+      <svg class="ico ico-sm"><use href="#i-warning"/></svg> Самодиагностика</button>{{end}}
     {{if .Device.IP}}<a class="btn btn-ghost" href="/devices/{{.Device.ID}}/rdp" title="Скачать .rdp для подключения"><svg class="ico ico-sm"><use href="#i-devices"/></svg> RDP</a>{{end}}
     <button class="btn btn-primary" data-modal-open="modal-edit">Изменить</button>
     {{if eq .User.Role "admin"}}

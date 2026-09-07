@@ -72,6 +72,44 @@ func (a *App) DevicePower(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "message": label + ": задача поставлена, агент выполнит в течение минуты"})
 }
 
+// DeviceSelfCheck — POST /devices/{id}/selfcheck : попросить агента прогнать
+// самодиагностику и прислать отчёт (CanWrite).
+//
+// Отвечает на самый частый вопрос про машину, которая числится онлайн, а данных
+// от неё нет: тот же agent.exe -check, который иначе пришлось бы запускать
+// руками на месте. Отчёт приходит во вкладку «Действия».
+//
+// Работает, пока агент забирает задачи. Машине, которая до сервера не
+// достучалась вовсе, это не поможет — она и задачу не заберёт; такую видно по
+// времени последнего heartbeat.
+func (a *App) DeviceSelfCheck(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if !user.CanWrite() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+
+	var hostname, token string
+	if a.DB.QueryRow(`SELECT COALESCE(hostname,''), COALESCE(agent_token,'')
+		FROM devices WHERE id=?`, id).Scan(&hostname, &token) != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": "устройство не найдено"})
+		return
+	}
+	if token == "" {
+		writeJSON(w, map[string]any{"ok": false,
+			"error": "на устройстве не установлен агент — диагностировать нечего"})
+		return
+	}
+	if _, err := a.enqueueTask(id, "check", "", "Самодиагностика агента", user.ID); err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": "не удалось поставить задачу"})
+		return
+	}
+	auth.LogAction(a.DB, user.ID, "device_selfcheck", hostname, "")
+	writeJSON(w, map[string]any{"ok": true,
+		"message": "Самодиагностика запрошена: отчёт появится во вкладке «Действия» в течение минуты"})
+}
+
 var macClean = regexp.MustCompile(`[^0-9a-fA-F]`)
 
 // buildMagicPacket собирает Wake-on-LAN magic-пакет: 6×0xFF + 16×MAC (102 байта).
