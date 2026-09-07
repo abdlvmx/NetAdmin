@@ -11,10 +11,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +25,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"netadmin/internal/wincon"
+	"netadmin/internal/winsvc"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -33,10 +39,40 @@ import (
 // было видно, какие машины ещё не обновились.
 const agentVersion = "1.1.0"
 
+// serverURL и token заполняет loadSettings в начале main: источников теперь два
+// (файл настроек рядом с агентом и переменные окружения), и выбирать между ними
+// на этапе инициализации пакета негде.
 var (
-	serverURL = envOr("NETADMIN_SERVER_URL", "http://127.0.0.1:8765")
-	token     = os.Getenv("NETADMIN_AGENT_TOKEN") // enrollment-токен, только для первой регистрации
+	serverURL string
+	token     string // enrollment-токен, только для первой регистрации
 )
+
+// normalizeServerURL достраивает адрес сервера до пригодного для запроса вида.
+//
+// Адрес вписывают руками в install_agent.bat на каждой машине, и «192.168.1.64»
+// вместо «http://192.168.1.64:8765» — самая частая опечатка: агент запускается,
+// но каждый запрос падает с «unsupported protocol scheme». Ошибка молчаливая и
+// повторяется на всём парке, поэтому проще достроить адрес, чем ловить её.
+//
+// Схема по умолчанию http (TLS в продукте нет), порт по умолчанию 8765.
+func normalizeServerURL(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, "/") // иначе в пути получится двойной слеш
+	if s == "" {
+		return "http://127.0.0.1:8765"
+	}
+	if !strings.Contains(s, "://") {
+		s = "http://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return s // не разобрали — оставляем как есть, ошибка вылезет при запросе
+	}
+	if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), "8765")
+	}
+	return u.String()
+}
 
 // Заголовки протокола. Токен по сети не передаётся — он лишь ключ HMAC,
 // а сервер выбирает ключ по идентификатору устройства.
@@ -276,12 +312,55 @@ func bigChange(cur, prev map[string]any) bool {
 	return false
 }
 
+// inventoryRetry — через сколько повторить часть инвентаря, которую сервер не
+// принял. Сбор идёт через PowerShell и стоит секунд процессорного времени,
+// поэтому долбиться каждые 15 секунд нельзя.
+const inventoryRetry = 15 * time.Minute
+
+// sendInventory отправляет часть инвентаря и говорит, принял ли её сервер.
+//
+// Раньше успехом считалось отсутствие ошибки связи: отказ сервера (например,
+// «устройство уже зарегистрировано» или временная 5xx при перезапуске) выглядел
+// как успешная отправка. Агент писал в журнал «отправлено», помечал инвентарь
+// сданным и молчал до суток, хотя на сервере не появлялось ничего.
+func sendInventory(path, label string, payload map[string]any, n int) bool {
+	code, body, err := post(path, payload)
+	switch {
+	case err != nil:
+		log.Printf("%s — ошибка связи: %v", label, err)
+		return false
+	case code < 200 || code >= 300:
+		rejects.report(label, code, string(body))
+		return false
+	}
+	log.Printf("%s: %d", label, n)
+	return true
+}
+
+// attemptStamp возвращает отметку времени для состояния агента: при успехе —
+// текущее время (следующая отправка через полный интервал), при неудаче —
+// сдвинутое так, чтобы повтор пришёлся через inventoryRetry.
+//
+// Время пишется в UTC, потому что due*-проверки читают его через time.Parse без
+// зоны, то есть как UTC. Раньше здесь писалось локальное время, и на любом поясе
+// кроме UTC все интервалы инвентаря уезжали на величину смещения: в Москве
+// (UTC+3) агент отправлял инвентарь на три часа позже положенного.
+func attemptStamp(ok bool, interval time.Duration) string {
+	if ok {
+		return time.Now().UTC().Format(stateTimeLayout)
+	}
+	return time.Now().UTC().Add(-interval + inventoryRetry).Format(stateTimeLayout)
+}
+
+// stateTimeLayout — формат отметок в agent_state.json (UTC, без зоны).
+const stateTimeLayout = "2006-01-02 15:04:05"
+
 // dueSoftware — пора ли слать инвентарь ПО (раз в сутки).
 func dueSoftware(last string) bool {
 	if last == "" {
 		return true
 	}
-	t, err := time.Parse("2006-01-02 15:04:05", last)
+	t, err := time.Parse(stateTimeLayout, last)
 	return err != nil || time.Since(t) >= 24*time.Hour
 }
 
@@ -290,7 +369,7 @@ func dueServices(last string) bool {
 	if last == "" {
 		return true
 	}
-	t, err := time.Parse("2006-01-02 15:04:05", last)
+	t, err := time.Parse(stateTimeLayout, last)
 	return err != nil || time.Since(t) >= 6*time.Hour
 }
 
@@ -300,7 +379,7 @@ func dueAutoruns(last string) bool {
 	if last == "" {
 		return true
 	}
-	t, err := time.Parse("2006-01-02 15:04:05", last)
+	t, err := time.Parse(stateTimeLayout, last)
 	return err != nil || time.Since(t) >= time.Hour
 }
 
@@ -310,7 +389,7 @@ func dueSchTasks(last string) bool {
 	if last == "" {
 		return true
 	}
-	t, err := time.Parse("2006-01-02 15:04:05", last)
+	t, err := time.Parse(stateTimeLayout, last)
 	return err != nil || time.Since(t) >= 6*time.Hour
 }
 
@@ -319,7 +398,7 @@ func dueDisks(last string) bool {
 	if last == "" {
 		return true
 	}
-	t, err := time.Parse("2006-01-02 15:04:05", last)
+	t, err := time.Parse(stateTimeLayout, last)
 	return err != nil || time.Since(t) >= 6*time.Hour
 }
 
@@ -332,12 +411,84 @@ func main() {
 		return
 	}
 
-	log.Printf("NetAdmin agent %s → %s", agentVersion, serverURL)
+	loadSettings()
+
+	// Самодиагностика: печатает, что настроено, доходит ли до сервера и что
+	// соберётся с этой машины. Окно не закрывается, если запущено двойным
+	// щелчком, — иначе вывод не успеть прочитать.
+	if len(os.Args) > 1 && (os.Args[1] == "-check" || os.Args[1] == "--check") {
+		code := runCheck()
+		holdWindow()
+		os.Exit(code)
+	}
+
+	install := flag.Bool("install", false,
+		"установить агента службой Windows (нужны права администратора)")
+	uninstall := flag.Bool("uninstall", false, "остановить и удалить службу агента")
+	srv := flag.String("server", "", "адрес сервера, например http://192.168.1.10:8765")
+	tok := flag.String("token", "", "enrollment-токен со страницы «Настройки» сервера")
+	flag.Parse()
+
+	switch {
+	case *install:
+		if err := installAgent(*srv, *tok); err != nil {
+			fmt.Println("ОШИБКА:", err)
+			holdWindow()
+			os.Exit(1)
+		}
+		holdWindow()
+		return
+	case *uninstall:
+		if err := uninstallAgent(); err != nil {
+			fmt.Println("ОШИБКА:", err)
+			holdWindow()
+			os.Exit(1)
+		}
+		holdWindow()
+		return
+	}
+
+	// Запуск двойным щелчком: спрашиваем адрес и код вместо того, чтобы
+	// закрыться с ошибкой в окне, которое человек не успевает прочитать.
+	if flag.NFlag() == 0 && wincon.OwnsConsole() {
+		runInteractiveSetup()
+		return
+	}
+
+	// Служба запускается диспетчером служб; из консоли агент работает так же,
+	// как раньше, — циклом до принудительной остановки.
+	if winsvc.IsService() {
+		startServiceLog() // у службы нет консоли: без этого падение не оставит следов
+		// Ошибка уходит в журнал: у службы нет консоли, и это единственный след.
+		// Диспетчеру о неудаче сообщает сам winsvc.Run.
+		err := winsvc.Run(agentServiceName, func(stop <-chan struct{}) error { return run(stop) })
+		if err != nil {
+			log.Printf("служба остановлена с ошибкой: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if err := run(nil); err != nil {
+		fmt.Println("ОШИБКА:", err)
+		holdWindow()
+		os.Exit(1)
+	}
+}
+
+// run — рабочий цикл агента. Возвращается, когда закрывается stop (у службы) —
+// из консоли stop нулевой, и цикл не прерывается.
+//
+// Отказ возвращается наверх, а не гасит процесс: под службой os.Exit не
+// оставляет диспетчеру ни отчёта, ни причины — в журнале только
+// «terminated unexpectedly», а действия восстановления дают цикл перезапусков.
+func run(stop <-chan struct{}) error {
+	log.Printf("NetAdmin agent %s → %s (настройки: %s)", agentVersion, serverURL, settingsSource)
 	cleanupOldBinary() // остаток прошлого самообновления
 	st := loadState()
 	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
 	if deviceToken == "" && token == "" {
-		log.Fatal("не задан NETADMIN_AGENT_TOKEN — enrollment-токен обязателен для первой регистрации")
+		return errors.New("не задан ключ регистрации: запустите agent.exe двойным щелчком " +
+			"и введите адрес сервера и код, либо задайте NETADMIN_AGENT_TOKEN")
 	}
 	var lastSent map[string]any
 	var lastHB time.Time
@@ -349,7 +500,7 @@ func main() {
 			status, body, err := post("/api/agent-heartbeat", metrics)
 			switch {
 			case err != nil:
-				log.Println("heartbeat error:", err)
+				rejects.reportOnce("net|"+err.Error(), "нет связи с сервером: "+err.Error())
 			case status == 401:
 				if deviceToken != "" {
 					log.Println("токен отозван — перерегистрация по enrollment-токену")
@@ -357,10 +508,10 @@ func main() {
 					st.DeviceToken, st.DeviceID = "", 0
 					saveState(st)
 				} else {
-					log.Println("heartbeat: 401 (неверный enrollment-токен)")
+					rejects.report("heartbeat", status, "неверный enrollment-токен")
 				}
 			case status == 409:
-				log.Println("устройство уже зарегистрировано: отзовите токен на сервере перед переустановкой агента")
+				rejects.report("heartbeat", status, "устройство уже зарегистрировано")
 			case status == 200:
 				var resp struct {
 					Token    string `json:"token"`
@@ -372,68 +523,78 @@ func main() {
 					st.DeviceToken = protectString(resp.Token) // DPAPI на Windows
 					st.DeviceID = resp.DeviceID
 					saveState(st)
+					clearEnrollToken() // общий токен больше не нужен этой машине
 					log.Println("получен персональный токен устройства")
 				}
+				rejects.clear() // связь есть — прошлые жалобы неактуальны
 				lastSent = metrics
 				lastHB = time.Now()
 				log.Println("heartbeat:", metrics["hostname"], metrics["cpu"], metrics["ram"], metrics["disk"])
+			default:
+				// Прежде всё, кроме 401/409/200, проваливалось мимо switch без
+				// единого слова в журнале. Самый частый случай — 403 «bad
+				// signature», когда enrollment-токен агента разошёлся с токеном
+				// сервера (например, config.json пересоздали). В логе тогда были
+				// видны только отказы инвентаря, и выглядело это так, будто
+				// heartbeat работает, а не принимается один лишь инвентарь.
+				rejects.report("heartbeat", status, string(body))
 			}
 		}
 
 		if runtime.GOOS == "windows" {
 			// инвентарь ПО — раз в сутки
 			if dueSoftware(st.LastSoftware) {
+				ok := true
 				if sw := collectSoftware(); len(sw) > 0 {
 					host, _ := os.Hostname()
-					if _, _, e := post("/api/agent-software", map[string]any{"hostname": host, "software": sw}); e == nil {
-						log.Printf("отправлено ПО: %d", len(sw))
-					}
+					ok = sendInventory("/api/agent-software", "отправлено ПО",
+						map[string]any{"hostname": host, "software": sw}, len(sw))
 				}
-				st.LastSoftware = time.Now().Format("2006-01-02 15:04:05")
+				st.LastSoftware = attemptStamp(ok, 24*time.Hour)
 				saveState(st)
 			}
 
 			// инвентарь конфигурации хоста: службы / автозагрузка / задачи.
 			// Изменения уходят в историю устройства.
 			if dueServices(st.LastServices) {
+				ok := true
 				if sv := collectServices(); len(sv) > 0 {
 					host, _ := os.Hostname()
-					if _, _, e := post("/api/agent-services", map[string]any{"hostname": host, "services": sv}); e == nil {
-						log.Printf("отправлено служб: %d", len(sv))
-					}
+					ok = sendInventory("/api/agent-services", "отправлено служб",
+						map[string]any{"hostname": host, "services": sv}, len(sv))
 				}
-				st.LastServices = time.Now().Format("2006-01-02 15:04:05")
+				st.LastServices = attemptStamp(ok, 6*time.Hour)
 				saveState(st)
 			}
 			if dueAutoruns(st.LastAutoruns) {
+				ok := true
 				if ar := collectAutoruns(); len(ar) > 0 {
 					host, _ := os.Hostname()
-					if _, _, e := post("/api/agent-autoruns", map[string]any{"hostname": host, "autoruns": ar}); e == nil {
-						log.Printf("отправлено точек автозагрузки: %d", len(ar))
-					}
+					ok = sendInventory("/api/agent-autoruns", "отправлено точек автозагрузки",
+						map[string]any{"hostname": host, "autoruns": ar}, len(ar))
 				}
-				st.LastAutoruns = time.Now().Format("2006-01-02 15:04:05")
+				st.LastAutoruns = attemptStamp(ok, time.Hour)
 				saveState(st)
 			}
 			if dueSchTasks(st.LastSchTasks) {
+				ok := true
 				if ts := collectScheduledTasks(); len(ts) > 0 {
 					host, _ := os.Hostname()
-					if _, _, e := post("/api/agent-schtasks", map[string]any{"hostname": host, "tasks": ts}); e == nil {
-						log.Printf("отправлено задач планировщика: %d", len(ts))
-					}
+					ok = sendInventory("/api/agent-schtasks", "отправлено задач планировщика",
+						map[string]any{"hostname": host, "tasks": ts}, len(ts))
 				}
-				st.LastSchTasks = time.Now().Format("2006-01-02 15:04:05")
+				st.LastSchTasks = attemptStamp(ok, 6*time.Hour)
 				saveState(st)
 			}
 			// здоровье дисков (SMART) — раз в 6 часов
 			if dueDisks(st.LastDisks) {
+				ok := true
 				if dk := collectDisks(); len(dk) > 0 {
 					host, _ := os.Hostname()
-					if _, _, e := post("/api/agent-disks", map[string]any{"hostname": host, "disks": dk}); e == nil {
-						log.Printf("отправлено дисков: %d", len(dk))
-					}
+					ok = sendInventory("/api/agent-disks", "отправлено дисков",
+						map[string]any{"hostname": host, "disks": dk}, len(dk))
 				}
-				st.LastDisks = time.Now().Format("2006-01-02 15:04:05")
+				st.LastDisks = attemptStamp(ok, 6*time.Hour)
 				saveState(st)
 			}
 		}
@@ -443,7 +604,15 @@ func main() {
 			pollTasks()
 		}
 
-		time.Sleep(pollInterval)
+		// Пауза до следующего круга. Служба должна останавливаться сразу, а не
+		// досыпать свои 15 секунд: Windows ждёт ответа ограниченное время и
+		// иначе пишет в журнал, что служба не отвечает.
+		select {
+		case <-stop:
+			log.Println("остановка агента")
+			return nil
+		case <-time.After(pollInterval):
+		}
 	}
 }
 

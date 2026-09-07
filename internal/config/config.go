@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -62,6 +63,56 @@ type Config struct {
 	BackupKeep          int    `json:"backup_keep"`
 	BackupDir           string `json:"backup_dir"`       // пусто = <каталог данных>/backups
 	HelpdeskEnabled     bool   `json:"helpdesk_enabled"` // приём заявок сотрудников через портал /help
+	// Сетевые настройки. Пустое значение означает «не задано»: тогда берётся
+	// одноимённая переменная окружения, а если нет и её — умолчание.
+	//
+	// Заведены потому, что служба Windows не наследует окружение консоли, из
+	// которой её ставили: указание задать NETADMIN_ALLOW перед запуском для
+	// установленной службы молча не срабатывало, и сузить доступ было негде.
+	ListenAddr   string `json:"listen_addr"`   // пусто = 0.0.0.0:8765
+	AllowSubnets string `json:"allow_subnets"` // пусто = локальные и частные сети
+}
+
+// NetworkSetting — действующее значение сетевой настройки и его источник.
+type NetworkSetting struct {
+	Value  string
+	Source string // SourceEnv, SourceConfig или SourceDefault
+}
+
+// Источники сетевых настроек — показываются в интерфейсе, чтобы «задал, а не
+// применилось» не превращалось в поиск вслепую.
+const (
+	SourceEnv     = "переменная окружения"
+	SourceConfig  = "настройки"
+	SourceDefault = "по умолчанию"
+)
+
+// resolveNet выбирает действующее значение: переменная окружения важнее
+// настройки из файла.
+//
+// Такой порядок сохраняет поведение развёртываний, где всё задано окружением
+// (контейнеры, запуск из консоли), — они продолжают работать в точности как
+// раньше. Чтобы «задал в интерфейсе, а работает старое» не оставалось
+// незамеченным, страница настроек показывает, что значение перекрыто
+// переменной, и какой именно.
+func resolveNet(env, fromFile string) NetworkSetting {
+	if v := strings.TrimSpace(os.Getenv(env)); v != "" {
+		return NetworkSetting{Value: v, Source: SourceEnv}
+	}
+	if v := strings.TrimSpace(fromFile); v != "" {
+		return NetworkSetting{Value: v, Source: SourceConfig}
+	}
+	return NetworkSetting{Source: SourceDefault}
+}
+
+// ListenAddrSetting — адрес прослушивания с учётом всех источников.
+func (c Config) ListenAddrSetting() NetworkSetting {
+	return resolveNet("NETADMIN_ADDR", c.ListenAddr)
+}
+
+// AllowSubnetsSetting — разрешённые подсети с учётом всех источников.
+func (c Config) AllowSubnetsSetting() NetworkSetting {
+	return resolveNet("NETADMIN_ALLOW", c.AllowSubnets)
 }
 
 // Кэш прочитанной конфигурации.

@@ -19,6 +19,17 @@ type App struct {
 	// «только локальные и частные сети», поэтому пустая конфигурация
 	// не открывает сервер наружу.
 	Allow netaccess.List
+	// Demo — режим витрины (`netadmin -demo`): активные действия в сети
+	// запрещены, чтобы показ продукта не трогал сеть смотрящего.
+	Demo bool
+	// Restart перезапускает сервер, если это умеет текущий способ запуска
+	// (служба Windows). nil означает, что перезапустить должен человек, —
+	// интерфейс тогда показывает, что именно сделать.
+	Restart func() error
+	// InstallAgent ставит агента на машину сервера. Возвращает вывод
+	// установщика. nil — возможность недоступна (сервер собран без агента
+	// или запущен не в Windows).
+	InstallAgent func(serverURL, token string) (string, error)
 }
 
 // Routes собирает маршруты приложения (с security-обёрткой).
@@ -86,6 +97,11 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /settings", a.SettingsPage)
 	mux.HandleFunc("POST /settings/organization", a.UpdateOrganization)
 	mux.HandleFunc("POST /settings/agent-token/rotate", a.RotateAgentToken)
+	mux.HandleFunc("GET /settings/agent-installer", a.AgentInstaller)
+	// Установка агента одной командой: скрипт и сборка отдаются без сессии —
+	// команда выполняется на машине, где сессии нет (см. enroll.go).
+	mux.HandleFunc("GET /enroll.ps1", a.EnrollScript)
+	mux.HandleFunc("GET /agent.exe", a.AgentBinary)
 	mux.HandleFunc("POST /settings/password", a.ChangePassword)
 	mux.HandleFunc("POST /settings/notifications", a.UpdateNotifications)
 	mux.HandleFunc("POST /settings/notifications/test", a.TestNotification)
@@ -93,6 +109,15 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/helpdesk", a.UpdateHelpdesk)
 	mux.HandleFunc("POST /settings/backup", a.UpdateBackup)
 	mux.HandleFunc("POST /settings/backup/now", a.BackupNow)
+	// Восстановление применяется при следующем запуске — см. netsettings.go
+	mux.HandleFunc("POST /settings/backup/restore", a.RestoreBackup)
+	mux.HandleFunc("POST /settings/backup/restore/cancel", a.CancelRestore)
+	mux.HandleFunc("POST /settings/network", a.UpdateNetwork)
+	mux.HandleFunc("POST /settings/restart", a.RestartServer)
+	mux.HandleFunc("POST /settings/agent-install-local", a.InstallLocalAgent)
+	// Одноразовые коды регистрации агентов — см. enrollcodes.go
+	mux.HandleFunc("POST /settings/enroll-code", a.CreateEnrollCode)
+	mux.HandleFunc("POST /settings/enroll-code/{id}/revoke", a.RevokeEnrollCode)
 
 	// Мониторинг сервисов (HTTP/TCP/DNS/…)
 	mux.HandleFunc("GET /monitoring", a.ServiceMonitorPage)
@@ -181,6 +206,7 @@ func (a *App) Routes() http.Handler {
 	// Карта сети
 	mux.HandleFunc("GET /network-map", a.NetworkMapPage)
 	mux.HandleFunc("GET /api/network-map", a.NetworkMapAPI)
+	mux.HandleFunc("GET /api/search", a.Search)
 
 	// История изменений сети
 	mux.HandleFunc("GET /network-changes", a.NetworkChangesPage)

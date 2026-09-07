@@ -225,6 +225,23 @@ CREATE TABLE IF NOT EXISTS disks (
     updated_at     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_disks_device ON disks(device_id);
+-- Одноразовые коды регистрации агентов.
+--
+-- Постоянный токен из config.json остаётся (им пользуются install_agent.bat и
+-- скрипты раскатки), но для установки руками он неудобен и опасен: попав в
+-- историю консоли или в переписку, он действует до ручной ротации. Код живёт
+-- заданный срок, считает установки и после исчерпания не подходит.
+CREATE TABLE IF NOT EXISTS enroll_codes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    code       TEXT UNIQUE NOT NULL,
+    expires_at TEXT NOT NULL,               -- UTC
+    max_uses   INTEGER NOT NULL DEFAULT 1,  -- 0 = без ограничения по числу
+    used_count INTEGER NOT NULL DEFAULT 0,
+    revoked    INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_enroll_codes_code ON enroll_codes(code);
 CREATE TABLE IF NOT EXISTS packages (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT,

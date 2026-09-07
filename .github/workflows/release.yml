@@ -1,0 +1,78 @@
+name: release
+
+# Готовые .exe для тех, у кого не установлен Go. Собирается по тегу вида v1.0.0:
+#   git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # нужно для создания релиза
+
+jobs:
+  release:
+    # Сборка идёт на Windows намеренно, хотя кросс-компиляция из Linux дешевле:
+    # половина кода агента лежит в файлах _windows.go, и на Linux их тесты
+    # просто не запускаются — релиз уходил бы непроверенным там, где работает.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Проверки
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Сборка
+        # Порядок важен: агент собирается первым и кладётся в
+        # internal/agentbin/bin, откуда сервер встраивает его через go:embed.
+        # Тогда установка агента не требует ничего загружать на сервер.
+        #
+        # -trimpath убирает пути сборочной машины из бинарника,
+        # -s -w выкидывают отладочную информацию (примерно -30% размера)
+        shell: pwsh
+        run: |
+          go build -trimpath -ldflags "-s -w" -o internal/agentbin/bin/agent.exe ./cmd/agent
+          go build -trimpath -ldflags "-s -w" -o dist/netadmin.exe ./cmd/netadmin
+          Copy-Item internal/agentbin/bin/agent.exe dist/agent.exe
+
+      - name: Контрольные суммы
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/*.exe | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)"
+          } | Out-File -FilePath dist/SHA256SUMS.txt -Encoding ascii
+
+      - name: Описание релиза
+        shell: pwsh
+        run: |
+          @'
+          ## Как запустить
+
+          1. Скачайте `netadmin.exe` из списка ниже.
+          2. Посмотреть без установки: `netadmin.exe -demo` — откроется браузер
+             с вымышленными данными. Сеть не сканируется, база временная.
+          3. Поставить по-настоящему: `netadmin.exe -install` из PowerShell
+             от имени администратора — сервер станет службой Windows.
+          4. Агент на рабочие станции ставится одной командой из PowerShell;
+             готовую строку показывает раздел «Настройки».
+
+          Требуется Windows. Ничего доустанавливать не нужно: файл самодостаточный.
+          Контрольные суммы — в `SHA256SUMS.txt`.
+          '@ | Out-File -FilePath notes.md -Encoding utf8
+
+      - name: Публикация
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          dist/netadmin.exe dist/agent.exe dist/SHA256SUMS.txt
+          --title "NetAdmin ${{ github.ref_name }}"
+          --notes-file notes.md

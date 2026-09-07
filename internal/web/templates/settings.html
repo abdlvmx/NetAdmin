@@ -28,13 +28,21 @@
     {{else if eq .Message "scan_saved"}}Настройки автосканирования сохранены.
     {{else if eq .Message "helpdesk_saved"}}Настройки портала заявок сохранены.
     {{else if eq .Message "test_sent"}}Тестовое письмо отправлено.
+    {{else if eq .Message "network_saved"}}Сетевые настройки сохранены. Они применятся после перезапуска сервера.
+    {{else if eq .Message "restore_staged"}}Восстановление подготовлено. Перезапустите сервер, чтобы база была заменена.
+    {{else if eq .Message "restore_restarting"}}Восстановление подготовлено, сервер перезапускается. Обновите страницу через несколько секунд.
+    {{else if eq .Message "restore_cancelled"}}Подготовленное восстановление отменено.
+    {{else if eq .Message "restarting"}}Сервер перезапускается. Обновите страницу через несколько секунд.
+    {{else if eq .Message "agent_installed"}}Агент установлен на этот компьютер. Устройство появится в списке в течение минуты.
+    {{else if eq .Message "code_created"}}Код создан. Скопируйте команду и выполните её на нужном компьютере.
+    {{else if eq .Message "code_revoked"}}Код отозван. Уже установленные агенты продолжат работать.
     {{else}}Сохранено.{{end}}
   </div>
   {{end}}
   {{if .Error}}
   <div class="banner err">
     {{if eq .Error "test_failed"}}Не удалось отправить письмо. Проверьте настройки SMTP.
-    {{else}}Ошибка.{{end}}
+    {{else}}{{.Error}}{{end}}
   </div>
   {{end}}
 
@@ -49,13 +57,186 @@
     </div>
 
     <div class="card">
+      <div class="card-header"><span class="card-title">Установка агента</span></div>
+
+      {{if .AgentBuildStale}}
+      <div class="banner err" style="margin-bottom:12px">
+        <b>Встроенная сборка агента устарела.</b> Она собрана из ревизии
+        <code>{{.AgentBuildRev}}</code> ({{.AgentBuildDate}}), а сервер — из
+        <code>{{.ServerBuildRev}}</code>. Машины получат старую сборку.<br>
+        Сервер встраивает агента на этапе своей сборки, поэтому собирать нужно в
+        порядке: сначала <code>go build -o internal/agentbin/bin/agent.exe ./cmd/agent</code>,
+        затем сервер. Либо загрузите свежий <b>agent.exe</b> в разделе
+        <a href="/packages">Установка ПО</a> — загруженная сборка важнее встроенной.
+      </div>
+      {{end}}
+
+      {{if .CanInstallLocalAgent}}
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Начните с машины, на которой работает сервер, — агент уже внутри,
+        скачивать и копировать ничего не нужно.</p>
+      <form method="post" action="/settings/agent-install-local"
+            data-confirm="Установить агент NetAdmin на этот компьютер?">
+        <button class="btn">Установить агент на этот компьютер</button>
+      </form>
+      <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+      {{end}}
+
+      {{if .AgentUpload}}
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        <b>На остальных компьютерах:</b> создайте одноразовый код и выполните
+        полученную строку в <b>PowerShell от имени администратора</b> на нужной
+        машине. Агент скачается с этого сервера, установится службой и
+        зарегистрируется сам.</p>
+
+      <form method="post" action="/settings/enroll-code" class="row" style="gap:10px;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Действует</label>
+          <select name="minutes">
+            <option value="15">15 минут</option>
+            <option value="60" selected>1 час</option>
+            <option value="480">8 часов</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Установок</label>
+          <select name="uses">
+            <option value="1">1</option>
+            <option value="5" selected>5</option>
+            <option value="25">25</option>
+          </select>
+        </div>
+        <button class="btn">Создать код</button>
+      </form>
+
+      {{if .EnrollCodes}}
+      <div style="margin-top:14px">
+        {{range .EnrollCodes}}
+        <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+          <div class="text-muted" style="font-size:12px;margin-bottom:8px">
+            Осталось {{if lt .Left 0}}без ограничения{{else}}{{.Left}}{{end}}
+            установок · истекает через {{.ExpiresIn}}
+          </div>
+          <div class="token-box">
+            <input value="{{.Command}}" readonly data-act="selectAll">
+            <form method="post" action="/settings/enroll-code/{{.ID}}/revoke"
+                  data-confirm="Отозвать код? Уже поставленные агенты продолжат работать.">
+              <button class="btn btn-ghost">Отозвать</button>
+            </form>
+          </div>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="text-muted" style="font-size:12px;margin-top:10px">
+        Действующих кодов нет. Код перестаёт подходить, когда кончился срок или
+        число установок, — потерянная строка не остаётся рабочей навсегда.</p>
+      {{end}}
+
+      <details style="margin-top:14px">
+        <summary class="text-muted" style="font-size:12px;cursor:pointer">Постоянный токен — для скриптов раскатки</summary>
+        <p class="text-muted" style="font-size:12px;margin:10px 0">
+          Действует до смены в разделе «Токен агента» ниже. Нужен там, где код
+          с ограниченным сроком неудобен: массовая раскатка через GPO или
+          собственный скрипт, установка через <code>install_agent.bat</code>.</p>
+        <div class="token-box">
+          <input value="{{.EnrollCmd}}" readonly data-act="selectAll">
+        </div>
+      </details>
+      {{else}}
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Этот сервер собран без встроенного агента. Чтобы ставить агента одной
+        командой, загрузите файл <b>agent.exe</b> в разделе
+        <a href="/packages">Установка ПО</a> — тот же файл используется для
+        обновления агентов на всём парке.</p>
+      {{end}}
+
+      <details style="margin-top:14px">
+        <summary class="text-muted" style="font-size:12px;cursor:pointer">Установка файлом, без команды</summary>
+        <p class="text-muted" style="font-size:12px;margin:10px 0">
+          Если PowerShell на устройствах закрыт политикой: скачайте установщик —
+          адрес сервера и токен уже вписаны. На компьютере положите рядом
+          <b>agent.exe</b> и запустите файл от имени администратора.
+          {{if .AgentUpload}}Сам <b>agent.exe</b> — по ссылке
+          <a href="/agent.exe">/agent.exe</a> с этого сервера.{{end}}</p>
+        {{if .ServerAddrs}}
+        <form method="get" action="/settings/agent-installer">
+          <div class="form-group">
+            <label>Адрес, по которому агенты видят сервер</label>
+            <select name="host">
+              {{range .ServerAddrs}}
+              <option value="{{.IP}}" {{if eq .IP $.PickedAddr}}selected{{end}}>{{.IP}} — {{.Iface}}</option>
+              {{end}}
+            </select>
+          </div>
+          <button class="btn">Скачать установщик агента</button>
+        </form>
+        <p class="text-muted" style="font-size:12px;margin-top:10px">
+          Если адресов несколько, выберите тот, что в одной подсети с компьютерами
+          сотрудников: у VPN и виртуальных адаптеров адрес свой, и по нему агенты
+          сервер не найдут.
+        </p>
+        {{else}}
+        <a class="btn" href="/settings/agent-installer" download>Скачать установщик агента</a>
+        {{end}}
+      </details>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Сеть и доступ</span></div>
+      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+        Читается только при запуске: после сохранения сервер нужно перезапустить.
+        Служба Windows не наследует переменные окружения консоли, поэтому задавать
+        эти значения нужно здесь.</p>
+      <form method="post" action="/settings/network">
+        <div class="form-group">
+          <label>Адрес прослушивания</label>
+          <input name="listen_addr" value="{{.ListenAddr}}" placeholder="0.0.0.0:8765">
+          <p class="text-muted" style="font-size:12px;margin-top:6px">
+            Пусто — <b>0.0.0.0:8765</b>: сервер доступен агентам на всех интерфейсах.
+            Действует: <b>{{if .ListenEffective.Value}}{{.ListenEffective.Value}}{{else}}0.0.0.0:8765{{end}}</b>
+            ({{.ListenEffective.Source}}).</p>
+        </div>
+        <div class="form-group">
+          <label>Разрешённые подсети</label>
+          <input name="allow_subnets" value="{{.AllowSubnets}}" placeholder="192.168.1.0/24, 10.0.0.0/8">
+          <p class="text-muted" style="font-size:12px;margin-top:6px">
+            Пусто — локальные и частные сети. Действует:
+            <b>{{if .AllowEffective.Value}}{{.AllowEffective.Value}}{{else}}локальные и частные{{end}}</b>
+            ({{.AllowEffective.Source}}). Значение <code>any</code> снимает ограничение —
+            канал не шифруется, так делать не стоит.<br>
+            Петля (<code>127.0.0.1</code>) разрешена всегда, каким бы ни был список: иначе
+            вы теряли бы интерфейс на самом сервере, а агент на этой машине — связь.</p>
+        </div>
+        <button class="btn">Сохранить</button>
+      </form>
+      {{if eq .AllowEffective.Source "переменная окружения"}}
+      <p class="text-muted" style="font-size:12px;margin-top:10px">
+        ⚠️ Подсети заданы переменной окружения <code>NETADMIN_ALLOW</code> — она
+        важнее того, что сохранено здесь. Уберите переменную, чтобы работала
+        настройка со страницы.</p>
+      {{end}}
+      {{if eq .ListenEffective.Source "переменная окружения"}}
+      <p class="text-muted" style="font-size:12px;margin-top:10px">
+        ⚠️ Адрес задан переменной окружения <code>NETADMIN_ADDR</code> — она важнее
+        того, что сохранено здесь.</p>
+      {{end}}
+      {{if .CanRestart}}
+      <form method="post" action="/settings/restart" style="margin-top:12px"
+            data-confirm="Перезапустить сервер? Интерфейс будет недоступен несколько секунд.">
+        <button class="btn btn-ghost">Перезапустить сервер</button>
+      </form>
+      {{end}}
+    </div>
+
+    <div class="card">
       <div class="card-header"><span class="card-title">Токен агента</span></div>
       <p class="text-muted" style="font-size:12px;margin-bottom:10px">
         Используется агентами для авторизации heartbeat и событий. Храните в тайне.</p>
       <div class="token-box">
         <input value="{{.AgentToken}}" readonly data-act="selectAll">
         <form method="post" action="/settings/agent-token/rotate"
-              data-confirm="Обновить токен? Старый перестанет работать.">
+              data-confirm="Обновить токен? Старый перестанет работать, агентов придётся переустановить.">
           <button class="btn btn-ghost">Обновить</button>
         </form>
       </div>
@@ -115,16 +296,33 @@
         <button class="btn btn-ghost">Снять копию сейчас</button>
       </form>
 
+      {{if .PendingRestore}}
+      <div class="banner err" style="margin-top:12px">
+        Восстановление подготовлено и применится при следующем запуске сервера.
+        Текущая база будет заменена, а прежняя — сохранена рядом с ней.
+        <form method="post" action="/settings/backup/restore/cancel" style="margin-top:8px">
+          <button class="btn btn-ghost">Отменить восстановление</button>
+        </form>
+      </div>
+      {{end}}
+
       {{if .Backups}}
       <div class="table-wrap" style="margin-top:14px">
         <table>
-          <thead><tr><th>Копия</th><th>Размер</th><th>Создана</th></tr></thead>
+          <thead><tr><th>Копия</th><th>Размер</th><th>Создана</th><th></th></tr></thead>
           <tbody>
             {{range .Backups}}
             <tr>
               <td>{{.Name}}</td>
               <td class="text-muted">{{sizeMB .Size}}</td>
               <td class="text-muted">{{dateTime .Created}}</td>
+              <td style="text-align:right">
+                <form method="post" action="/settings/backup/restore"
+                      data-confirm="Восстановить базу из копии {{.Name}}? Текущие данные будут заменены. Прежняя база сохранится рядом.">
+                  <input type="hidden" name="name" value="{{.Name}}">
+                  <button class="btn btn-ghost">Восстановить</button>
+                </form>
+              </td>
             </tr>
             {{end}}
           </tbody>

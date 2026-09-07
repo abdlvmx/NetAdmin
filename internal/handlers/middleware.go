@@ -92,6 +92,28 @@ func csrfToken(r *http.Request) string {
 	return v
 }
 
+// demoBlocked сообщает, что запрос обращается к сети по-настоящему: активное
+// сканирование, ping, скан портов и внеочередной опрос SNMP. Пассивные страницы
+// и правки данных в демо работают как обычно — смотреть продукт это не мешает.
+//
+// Пути перечислены точно, а не по суффиксу: у агента есть свой /api/agent-tasks/poll,
+// и он к сети смотрящего отношения не имеет.
+func demoBlocked(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	p := r.URL.Path
+	switch {
+	case p == "/api/scan", p == "/api/ping":
+		return true
+	case strings.HasPrefix(p, "/devices/") && strings.HasSuffix(p, "/scan-ports"):
+		return true
+	case strings.HasPrefix(p, "/snmp/") && strings.HasSuffix(p, "/poll"):
+		return true
+	}
+	return false
+}
+
 // withSecurity оборачивает роутер: ограничение по подсетям, security-заголовки
 // и CSRF (double-submit).
 func (a *App) withSecurity(next http.Handler) http.Handler {
@@ -116,6 +138,16 @@ func (a *App) withSecurity(next http.Handler) http.Handler {
 		// анти-DoS на эндпоинтах агента (по IP)
 		if strings.HasPrefix(r.URL.Path, "/api/agent-") && !agentLimiter.allow(clientIP(r)) {
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+
+		// В демо-режиме активные действия в сети отключены. Обещание «ваша сеть
+		// о запуске не узнает» напечатано в баннере и в README, а кнопки ping и
+		// скана остаются на страницах: без этой проверки любопытное нажатие
+		// разослало бы ICMP и ARP по настоящей подсети зрителя.
+		if a.Demo && demoBlocked(r) {
+			http.Error(w, "в демонстрационном режиме действия в сети отключены",
+				http.StatusForbidden)
 			return
 		}
 

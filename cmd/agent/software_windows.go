@@ -6,12 +6,24 @@ import "golang.org/x/sys/windows/registry"
 
 // collectSoftware читает установленное ПО из реестра Windows (Uninstall-ветки).
 func collectSoftware() []map[string]any {
-	paths := []struct {
+	type spot struct {
 		root registry.Key
 		path string
-	}{
+	}
+	paths := []spot{
 		{registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`},
 		{registry.LOCAL_MACHINE, `SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall`},
+		// на случай запуска не от SYSTEM (ручной запуск, отладка)
+		{registry.CURRENT_USER, `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`},
+	}
+	// ПО, установленное «только для меня», лежит в кусте пользователя, а не в
+	// HKLM. Агент работает от SYSTEM, поэтому его собственный HKCU пуст —
+	// пользовательские ветки ищем в профилях из HKEY_USERS.
+	for _, h := range userHives() {
+		paths = append(paths,
+			spot{registry.USERS, h.SID + `\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`},
+			spot{registry.USERS, h.SID + `\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall`},
+		)
 	}
 	seen := map[string]bool{}
 	var out []map[string]any
