@@ -135,6 +135,18 @@ async function ddPower(action){
     if(d.ok){ loaded['tasks']=false; }
   }catch(e){ toast('Ошибка выполнения действия','err'); }
 }
+// ddSelfCheck просит агента прогнать самодиагностику. Отчёт придёт не сразу:
+// агент забирает задачи раз в минуту, поэтому вкладка «Действия» помечается
+// неактуальной, а не перечитывается прямо сейчас.
+async function ddSelfCheck(btn){
+  const old = btn.textContent; btn.disabled=true; btn.textContent='Запрошено…';
+  try{
+    const d = await (await fetch(`/devices/${DEV_ID}/selfcheck`,{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}})).json();
+    toast(d.ok ? (d.message||'Запрошено') : (d.error||'Ошибка'), d.ok?'ok':'err');
+    if(d.ok){ loaded['tasks']=false; }
+  }catch(e){ toast('Не удалось запросить самодиагностику','err'); }
+  btn.disabled=false; btn.textContent=old;
+}
 async function ddScanPorts(btn){
   const old = btn.textContent; btn.disabled=true; btn.textContent='Скан…';
   try{
@@ -155,3 +167,4 @@ window.actions.power = function (el) { ddPower(el.dataset.power); };
 window.actions.ping = function () { ddPing(); };
 window.actions.scanPorts = function (el) { ddScanPorts(el); };
 window.actions.runCommand = function () { ddRunCommand(); };
+window.actions.selfcheck = function (el) { ddSelfCheck(el); };

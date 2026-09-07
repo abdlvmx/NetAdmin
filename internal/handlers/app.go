@@ -66,6 +66,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /devices/{id}/scan-ports", a.ScanPorts)
 	// Удалённые действия (RMM): питание и подключение к рабочему столу
 	mux.HandleFunc("POST /devices/{id}/power", a.DevicePower)
+	mux.HandleFunc("POST /devices/{id}/selfcheck", a.DeviceSelfCheck)
 	mux.HandleFunc("GET /devices/{id}/rdp", a.DeviceRDP)
 	mux.HandleFunc("POST /devices/{id}/run-command", a.RunDeviceCommand)
 	// Команды из готовой библиотеки (RMM)
