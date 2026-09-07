@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -31,6 +33,14 @@ const (
 // loadSettings.
 var settingsSource = sourceDefault
 
+// settingsDenied — файл настроек есть, но прочитать его не удалось.
+//
+// Каталог установки закрыт для всех, кроме SYSTEM и администраторов, поэтому
+// запуск из обычной консоли настроек не увидит. Отличать это от «настроек нет»
+// обязательно: иначе agent -check ставит противоположный диагноз и отправляет
+// переустанавливать исправно работающего агента.
+var settingsDenied bool
+
 // rawServerURL — адрес до достраивания до полного вида, как его задали.
 var rawServerURL string
 
@@ -46,11 +56,23 @@ func configPathIn(dir string) string { return filepath.Join(dir, "agent_config.j
 func configPath() string             { return configPathIn(exeDir()) }
 
 func loadAgentConfigFrom(dir string) agentConfig {
-	var c agentConfig
-	if b, err := os.ReadFile(configPathIn(dir)); err == nil {
-		_ = json.Unmarshal(b, &c)
-	}
+	c, _ := readAgentConfig(dir)
 	return c
+}
+
+// readAgentConfig читает настройки и отдельно сообщает о недоступном файле.
+// Отсутствие файла ошибкой не считается: настройки могут прийти из окружения.
+func readAgentConfig(dir string) (agentConfig, error) {
+	var c agentConfig
+	b, err := os.ReadFile(configPathIn(dir))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return c, nil
+		}
+		return c, err
+	}
+	_ = json.Unmarshal(b, &c)
+	return c, nil
 }
 
 // saveAgentConfigTo пишет настройки рядом с агентом.
@@ -91,7 +113,8 @@ func clearEnrollToken() {
 // могли остаться от прошлой установки через install_agent.bat — и тогда
 // переустановка агента на новый сервер молча не срабатывала бы.
 func loadSettings() {
-	c := loadAgentConfigFrom(exeDir())
+	c, err := readAgentConfig(exeDir())
+	settingsDenied = err != nil
 	envURL, envTok := os.Getenv("NETADMIN_SERVER_URL"), os.Getenv("NETADMIN_AGENT_TOKEN")
 
 	switch {

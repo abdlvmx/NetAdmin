@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"netadmin/internal/agentbin"
+	"netadmin/internal/instdir"
 	"netadmin/internal/winsvc"
 )
 
@@ -33,13 +34,9 @@ const (
 // месте, а не там, откуда человек запустил файл: скачанный в «Загрузки» .exe
 // заводил базу прямо в «Загрузках», а положенный в Program Files не мог
 // записать её вовсе.
-func installDir() string {
-	base := os.Getenv("ProgramData")
-	if base == "" {
-		base = `C:\ProgramData`
-	}
-	return filepath.Join(base, "NetAdmin")
-}
+//
+// Каталог общий с агентом, поэтому и путь, и права на него живут в одном месте.
+func installDir() string { return instdir.Path() }
 
 func serviceExePath() string { return filepath.Join(installDir(), "netadmin.exe") }
 
@@ -53,9 +50,14 @@ func installServer(firewall firewallChoice) error {
 	if err != nil {
 		return fmt.Errorf("путь к текущему файлу: %w", err)
 	}
+	// Каталог заводится с явным списком доступа. Унаследованные права
+	// C:\ProgramData позволяют обычному пользователю положить сюда файл, а
+	// созданное отдают ему в полное распоряжение — этого хватает, чтобы
+	// подменить файл службы, работающей от LocalSystem.
 	dir := installDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("каталог %s: %w", dir, err)
+	tightened, err := instdir.Secure(dir)
+	if err != nil {
+		return err
 	}
 	dst := serviceExePath()
 
@@ -85,6 +87,9 @@ func installServer(firewall firewallChoice) error {
 
 	fmt.Println("Служба NetAdmin установлена и запущена.")
 	fmt.Printf("  Программа и данные: %s\n", dir)
+	if tightened {
+		fmt.Println("  Доступ к каталогу ограничен SYSTEM и администраторами (был открыт).")
+	}
 	fmt.Printf("  Журнал службы:      %s\n", logPath())
 	fmt.Println("  Веб-интерфейс:      http://127.0.0.1:8765")
 	if agentbin.Available() {

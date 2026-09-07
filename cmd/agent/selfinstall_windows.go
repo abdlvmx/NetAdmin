@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"netadmin/internal/instdir"
 	"netadmin/internal/winsvc"
 )
 
@@ -27,13 +28,10 @@ const (
 	agentServiceDesc    = "Агент NetAdmin: метрики и инвентарь ПО, служб, автозагрузки и задач."
 )
 
-func agentInstallDir() string {
-	base := os.Getenv("ProgramData")
-	if base == "" {
-		base = `C:\ProgramData`
-	}
-	return filepath.Join(base, "NetAdmin")
-}
+// agentInstallDir — каталог установки, общий с сервером: агент обслуживает в
+// том числе машину сервера, и два каталога значили бы два места, где искать
+// настройки и состояние.
+func agentInstallDir() string { return instdir.Path() }
 
 func agentExePath() string { return filepath.Join(agentInstallDir(), "agent.exe") }
 
@@ -45,9 +43,13 @@ func installAgent(server, tok string) error {
 		return fmt.Errorf("нужны права администратора: откройте PowerShell «от имени администратора» и повторите")
 	}
 
+	// Явный список доступа вместо унаследованного от C:\ProgramData: там
+	// обычный пользователь может создать файл и получить на него полные права,
+	// а рядом лежат enrollment-токен и персональный токен устройства.
 	dir := agentInstallDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("каталог %s: %w", dir, err)
+	tightened, err := instdir.Secure(dir)
+	if err != nil {
+		return err
 	}
 	existing := loadAgentConfigFrom(dir)
 
@@ -107,6 +109,9 @@ func installAgent(server, tok string) error {
 	fmt.Println("Агент NetAdmin установлен и запущен.")
 	fmt.Printf("  Сервер:    %s\n", normalizeServerURL(server))
 	fmt.Printf("  Каталог:   %s\n", dir)
+	if tightened {
+		fmt.Println("  Доступ к каталогу ограничен SYSTEM и администраторами (был открыт).")
+	}
 	fmt.Println()
 	fmt.Println("Если устройство не появится на сервере в течение минуты:")
 	fmt.Printf("  \"%s\" -check\n", dst)
