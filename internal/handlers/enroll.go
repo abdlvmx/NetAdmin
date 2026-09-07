@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,8 +52,14 @@ func (a *App) latestAgentBuild() (agentBuild, bool) {
 	// «этот сервер собран без встроенного агента», хотя агент как раз внутри,
 	// и установка одной командой переставала работать без всякой причины.
 	if err == nil && b.Stored != "" && b.SHA256 != "" {
-		if _, err := os.Stat(filepath.Join(packagesDir(), b.Stored)); err == nil {
+		switch _, statErr := os.Stat(filepath.Join(packagesDir(), b.Stored)); {
+		case statErr == nil:
 			return b, true
+		case !errors.Is(statErr, fs.ErrNotExist):
+			// Файл на месте, но недоступен. Молча подсунуть встроенную сборку
+			// значит отдать машинам не ту версию, которую администратор выложил
+			// для обновления парка, — и ничем этого не показать.
+			log.Printf("сборка агента %s недоступна, отдаётся встроенная: %v", b.Stored, statErr)
 		}
 	}
 	if data, sum, ok := agentEmbedded(); ok {
