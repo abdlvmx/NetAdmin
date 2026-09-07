@@ -59,7 +59,19 @@ func Static() http.Handler {
 	}))
 }
 
+// demoMode — режим витрины: страницы показывают, что данные вымышленные.
+// Ставится один раз при старте, до первого запроса, поэтому блокировка
+// не нужна.
+var demoMode bool
+
+// SetDemo включает пометку демо-режима на всех страницах. Пометка сделана
+// признаком уровня пакета, а не полем данных страницы: у каждой страницы своя
+// структура, и протаскивать один флаг через два десятка структур ради баннера
+// значило бы менять их все.
+func SetDemo(v bool) { demoMode = v }
+
 var funcMap = template.FuncMap{
+	"demo":        func() bool { return demoMode },
 	"upper":       strings.ToUpper,
 	"actionIcon":  actionIcon,
 	"actionCat":   actionCat,

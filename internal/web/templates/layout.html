@@ -166,6 +166,11 @@
 
     /* ===== MAIN ===== */
     .main { margin-left: 250px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+    .demo-bar { background: var(--amber-soft); color: var(--amber);
+      border-bottom: 1px solid var(--border); padding: 9px 28px; font-size: var(--fs-sm);
+      display: flex; align-items: center; gap: 9px; }
+    .demo-bar .ico { width: 16px; height: 16px; flex: none; }
+    .demo-bar b { font-weight: 700; }
     .topbar { padding: 22px 28px 4px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
     .topbar h1 { font-size: var(--fs-xl); font-weight: 600; }
     .topbar .sub { font-size: var(--fs-sm); color: var(--muted); margin-top: 3px; }
@@ -515,6 +520,9 @@
 {{end}}
 
 <div class="main">
+  {{if demo}}<div class="demo-bar"><svg class="ico"><use href="#i-warning"/></svg>
+    <span><b>Демонстрационный режим.</b> Все устройства, сотрудники и заявки вымышлены,
+    база временная и будет удалена при выходе. Сеть не сканируется.</span></div>{{end}}
   {{block "content" .}}{{end}}
 </div>
 
