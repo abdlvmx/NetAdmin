@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"os/user"
 	"strings"
 	"time"
@@ -28,28 +27,35 @@ func runCheck() int {
 	}
 
 	// --- настройки ---
+	//
+	// Источник указывается первой строкой: настройки берутся из файла рядом с
+	// агентом либо из переменных окружения, и при неверном адресе прежде всего
+	// нужно знать, какое из двух мест править.
 	fmt.Println("Настройки")
-	raw := os.Getenv("NETADMIN_SERVER_URL")
+	fmt.Printf("  источник          %s\n", settingsSource)
 	switch {
-	case raw == "":
-		fmt.Printf("  адрес сервера     %s (NETADMIN_SERVER_URL не задан, значение по умолчанию)\n", serverURL)
+	case rawServerURL == "":
+		fmt.Printf("  адрес сервера     %s (не задан, значение по умолчанию)\n", serverURL)
 		fail("адрес сервера не задан — агент будет искать сервер на этой же машине.\n" +
-			"             Задайте NETADMIN_SERVER_URL или переустановите агента установщиком из Настроек.")
-	case raw != serverURL:
+			"             Поставьте агента заново: agent.exe -install -server=… -token=…")
+	case rawServerURL != serverURL:
 		fmt.Printf("  адрес сервера     %s\n", serverURL)
-		fmt.Printf("                    (в переменной %q — достроен до полного вида)\n", raw)
+		fmt.Printf("                    (задан как %q — достроен до полного вида)\n", rawServerURL)
 	default:
 		fmt.Printf("  адрес сервера     %s\n", serverURL)
 	}
 
 	switch {
-	case strings.Contains(raw, "YOUR_URL_HERE"), strings.Contains(token, "YOUR_TOKEN_HERE"):
-		fail("в переменных остались заглушки из шаблона install_agent.bat.\n" +
-			"             Скачайте готовый установщик: Настройки → Установка агента.")
+	case strings.Contains(rawServerURL, "YOUR_URL_HERE"), strings.Contains(token, "YOUR_TOKEN_HERE"):
+		fail("в настройках остались заглушки из шаблона install_agent.bat.\n" +
+			"             Поставьте агента заново командой со страницы «Настройки».")
 	case token == "":
-		fmt.Println("  enrollment-токен  не задан")
+		fmt.Println("  enrollment-токен  не задан (нормально, если устройство уже зарегистрировано)")
 	default:
 		fmt.Printf("  enrollment-токен  задан (%d символов)\n", len(token))
+	}
+	if settingsSource == sourceConfig {
+		fmt.Printf("  файл настроек     %s\n", configPath())
 	}
 	fmt.Printf("  файл состояния    %s\n", statePath())
 
@@ -57,7 +63,20 @@ func runCheck() int {
 	fmt.Println("\nРегистрация")
 	st := loadState()
 	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
+
+	// Токен устройства зашифрован DPAPI под той учётной записью, что его
+	// получила, — а получает его служба, работающая от SYSTEM. Запущенная
+	// администратором проверка расшифровать его не может, и раньше это
+	// выглядело как «устройство не зарегистрировано» плюс ложная жалоба на
+	// несовпадение токенов. Идентификатор устройства в файле не шифруется,
+	// поэтому отличить одно от другого можно.
+	lockedToService := st.DeviceToken != "" && deviceToken == ""
+
 	switch {
+	case lockedToService:
+		fmt.Printf("  устройство        #%d, зарегистрировано\n", st.DeviceID)
+		fmt.Println("  персональный токен зашифрован под учётной записью службы (SYSTEM)")
+		fmt.Println("                    и из этой консоли не читается — это нормально")
 	case deviceID > 0 && deviceToken != "":
 		fmt.Printf("  устройство        #%d, персональный токен получен\n", deviceID)
 	case token != "":
@@ -65,7 +84,7 @@ func runCheck() int {
 	default:
 		fmt.Println("  устройство        не зарегистрировано")
 		fail("нет ни персонального, ни enrollment-токена — подключиться нечем.\n" +
-			"             Скачайте установщик в Настройках и запустите от администратора.")
+			"             Поставьте агента заново командой со страницы «Настройки».")
 	}
 
 	// --- связь ---
@@ -87,25 +106,36 @@ func runCheck() int {
 
 		// Подписанный запрос: именно он выявляет расхождение токенов, которое
 		// со стороны выглядит как «агент работает, но данных нет».
-		code, body, err := post("/api/agent-heartbeat", collectMetrics())
+		//
+		// Если токен устройства принадлежит службе, подписать запрос отсюда
+		// нечем: проверка получила бы 403 и обвинила бы в несовпадении токенов
+		// исправно работающего агента.
 		switch {
-		case err != nil:
-			fail("запрос к серверу не прошёл: %v", err)
-		case code == 200:
-			fmt.Println("  подпись запроса   ok — сервер принял данные")
-		case code == 403:
-			fail("сервер отверг подпись (HTTP 403: %s).\n"+
-				"             Токен агента не совпадает с серверным — так бывает после\n"+
-				"             смены токена или пересоздания config.json. Скачайте установщик\n"+
-				"             заново: Настройки → Установка агента.", strings.TrimSpace(string(body)))
-		case code == 409:
-			fail("устройство уже зарегистрировано под другим токеном (HTTP 409).\n" +
-				"             Откройте карточку устройства на сервере и нажмите «Сбросить токен»,\n" +
-				"             затем запустите агента снова.")
-		case code == 401:
-			fail("сервер не принял токен (HTTP 401). Проверьте enrollment-токен в Настройках.")
+		case lockedToService:
+			fmt.Println("  подпись запроса   не проверялась: подписать может только служба")
+			fmt.Println("                    Работу агента видно на сервере — по времени")
+			fmt.Println("                    последнего heartbeat в карточке устройства.")
 		default:
-			fail("сервер ответил HTTP %d: %s", code, strings.TrimSpace(string(body)))
+			code, body, err := post("/api/agent-heartbeat", collectMetrics())
+			switch {
+			case err != nil:
+				fail("запрос к серверу не прошёл: %v", err)
+			case code == 200:
+				fmt.Println("  подпись запроса   ok — сервер принял данные")
+			case code == 403:
+				fail("сервер отверг подпись (HTTP 403: %s).\n"+
+					"             Токен агента не совпадает с серверным — так бывает после\n"+
+					"             смены токена или пересоздания config.json. Поставьте агента\n"+
+					"             заново командой со страницы «Настройки».", strings.TrimSpace(string(body)))
+			case code == 409:
+				fail("устройство уже зарегистрировано под другим токеном (HTTP 409).\n" +
+					"             Откройте карточку устройства на сервере и нажмите «Сбросить токен»,\n" +
+					"             затем запустите агента снова.")
+			case code == 401:
+				fail("сервер не принял токен (HTTP 401). Проверьте enrollment-токен в Настройках.")
+			default:
+				fail("сервер ответил HTTP %d: %s", code, strings.TrimSpace(string(body)))
+			}
 		}
 	}
 

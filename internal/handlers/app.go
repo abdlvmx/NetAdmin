@@ -26,6 +26,10 @@ type App struct {
 	// (служба Windows). nil означает, что перезапустить должен человек, —
 	// интерфейс тогда показывает, что именно сделать.
 	Restart func() error
+	// InstallAgent ставит агента на машину сервера. Возвращает вывод
+	// установщика. nil — возможность недоступна (сервер собран без агента
+	// или запущен не в Windows).
+	InstallAgent func(serverURL, token string) (string, error)
 }
 
 // Routes собирает маршруты приложения (с security-обёрткой).
@@ -94,6 +98,10 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/organization", a.UpdateOrganization)
 	mux.HandleFunc("POST /settings/agent-token/rotate", a.RotateAgentToken)
 	mux.HandleFunc("GET /settings/agent-installer", a.AgentInstaller)
+	// Установка агента одной командой: скрипт и сборка отдаются без сессии —
+	// команда выполняется на машине, где сессии нет (см. enroll.go).
+	mux.HandleFunc("GET /enroll.ps1", a.EnrollScript)
+	mux.HandleFunc("GET /agent.exe", a.AgentBinary)
 	mux.HandleFunc("POST /settings/password", a.ChangePassword)
 	mux.HandleFunc("POST /settings/notifications", a.UpdateNotifications)
 	mux.HandleFunc("POST /settings/notifications/test", a.TestNotification)
@@ -106,6 +114,10 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/backup/restore/cancel", a.CancelRestore)
 	mux.HandleFunc("POST /settings/network", a.UpdateNetwork)
 	mux.HandleFunc("POST /settings/restart", a.RestartServer)
+	mux.HandleFunc("POST /settings/agent-install-local", a.InstallLocalAgent)
+	// Одноразовые коды регистрации агентов — см. enrollcodes.go
+	mux.HandleFunc("POST /settings/enroll-code", a.CreateEnrollCode)
+	mux.HandleFunc("POST /settings/enroll-code/{id}/revoke", a.RevokeEnrollCode)
 
 	// Мониторинг сервисов (HTTP/TCP/DNS/…)
 	mux.HandleFunc("GET /monitoring", a.ServiceMonitorPage)

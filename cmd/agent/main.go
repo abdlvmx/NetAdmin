@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -25,6 +26,9 @@ import (
 	"strings"
 	"time"
 
+	"netadmin/internal/wincon"
+	"netadmin/internal/winsvc"
+
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
@@ -35,9 +39,12 @@ import (
 // было видно, какие машины ещё не обновились.
 const agentVersion = "1.1.0"
 
+// serverURL и token заполняет loadSettings в начале main: источников теперь два
+// (файл настроек рядом с агентом и переменные окружения), и выбирать между ними
+// на этапе инициализации пакета негде.
 var (
-	serverURL = normalizeServerURL(envOr("NETADMIN_SERVER_URL", "http://127.0.0.1:8765"))
-	token     = os.Getenv("NETADMIN_AGENT_TOKEN") // enrollment-токен, только для первой регистрации
+	serverURL string
+	token     string // enrollment-токен, только для первой регистрации
 )
 
 // normalizeServerURL достраивает адрес сервера до пригодного для запроса вида.
@@ -323,8 +330,7 @@ func sendInventory(path, label string, payload map[string]any, n int) bool {
 		log.Printf("%s — ошибка связи: %v", label, err)
 		return false
 	case code < 200 || code >= 300:
-		log.Printf("%s — сервер отверг (HTTP %d): %s", label, code,
-			strings.TrimSpace(string(body)))
+		rejects.report(label, code, string(body))
 		return false
 	}
 	log.Printf("%s: %d", label, n)
@@ -405,6 +411,8 @@ func main() {
 		return
 	}
 
+	loadSettings()
+
 	// Самодиагностика: печатает, что настроено, доходит ли до сервера и что
 	// соберётся с этой машины. Окно не закрывается, если запущено двойным
 	// щелчком, — иначе вывод не успеть прочитать.
@@ -414,12 +422,63 @@ func main() {
 		os.Exit(code)
 	}
 
-	log.Printf("NetAdmin agent %s → %s", agentVersion, serverURL)
+	install := flag.Bool("install", false,
+		"установить агента службой Windows (нужны права администратора)")
+	uninstall := flag.Bool("uninstall", false, "остановить и удалить службу агента")
+	srv := flag.String("server", "", "адрес сервера, например http://192.168.1.10:8765")
+	tok := flag.String("token", "", "enrollment-токен со страницы «Настройки» сервера")
+	flag.Parse()
+
+	switch {
+	case *install:
+		if err := installAgent(*srv, *tok); err != nil {
+			fmt.Println("ОШИБКА:", err)
+			holdWindow()
+			os.Exit(1)
+		}
+		holdWindow()
+		return
+	case *uninstall:
+		if err := uninstallAgent(); err != nil {
+			fmt.Println("ОШИБКА:", err)
+			holdWindow()
+			os.Exit(1)
+		}
+		holdWindow()
+		return
+	}
+
+	// Запуск двойным щелчком: спрашиваем адрес и код вместо того, чтобы
+	// закрыться с ошибкой в окне, которое человек не успевает прочитать.
+	if flag.NFlag() == 0 && wincon.OwnsConsole() {
+		runInteractiveSetup()
+		return
+	}
+
+	// Служба запускается диспетчером служб; из консоли агент работает так же,
+	// как раньше, — циклом до принудительной остановки.
+	if winsvc.IsService() {
+		startServiceLog() // у службы нет консоли: без этого падение не оставит следов
+		if err := winsvc.Run(agentServiceName, func(stop <-chan struct{}) { run(stop) }); err != nil {
+			log.Fatalf("служба: %v", err)
+		}
+		return
+	}
+	run(nil)
+}
+
+// run — рабочий цикл агента. Возвращается, когда закрывается stop (у службы) —
+// из консоли stop нулевой, и цикл не прерывается.
+func run(stop <-chan struct{}) {
+	log.Printf("NetAdmin agent %s → %s (настройки: %s)", agentVersion, serverURL, settingsSource)
 	cleanupOldBinary() // остаток прошлого самообновления
 	st := loadState()
 	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
 	if deviceToken == "" && token == "" {
-		log.Fatal("не задан NETADMIN_AGENT_TOKEN — enrollment-токен обязателен для первой регистрации")
+		log.Print("не задан ключ регистрации: запустите agent.exe двойным щелчком " +
+			"и введите адрес сервера и код, либо задайте NETADMIN_AGENT_TOKEN")
+		wincon.Hold()
+		os.Exit(1)
 	}
 	var lastSent map[string]any
 	var lastHB time.Time
@@ -431,7 +490,7 @@ func main() {
 			status, body, err := post("/api/agent-heartbeat", metrics)
 			switch {
 			case err != nil:
-				log.Println("heartbeat error:", err)
+				rejects.reportOnce("net|"+err.Error(), "нет связи с сервером: "+err.Error())
 			case status == 401:
 				if deviceToken != "" {
 					log.Println("токен отозван — перерегистрация по enrollment-токену")
@@ -439,10 +498,10 @@ func main() {
 					st.DeviceToken, st.DeviceID = "", 0
 					saveState(st)
 				} else {
-					log.Println("heartbeat: 401 (неверный enrollment-токен)")
+					rejects.report("heartbeat", status, "неверный enrollment-токен")
 				}
 			case status == 409:
-				log.Println("устройство уже зарегистрировано: отзовите токен на сервере перед переустановкой агента")
+				rejects.report("heartbeat", status, "устройство уже зарегистрировано")
 			case status == 200:
 				var resp struct {
 					Token    string `json:"token"`
@@ -454,8 +513,10 @@ func main() {
 					st.DeviceToken = protectString(resp.Token) // DPAPI на Windows
 					st.DeviceID = resp.DeviceID
 					saveState(st)
+					clearEnrollToken() // общий токен больше не нужен этой машине
 					log.Println("получен персональный токен устройства")
 				}
+				rejects.clear() // связь есть — прошлые жалобы неактуальны
 				lastSent = metrics
 				lastHB = time.Now()
 				log.Println("heartbeat:", metrics["hostname"], metrics["cpu"], metrics["ram"], metrics["disk"])
@@ -466,8 +527,7 @@ func main() {
 				// сервера (например, config.json пересоздали). В логе тогда были
 				// видны только отказы инвентаря, и выглядело это так, будто
 				// heartbeat работает, а не принимается один лишь инвентарь.
-				log.Printf("heartbeat — сервер отверг (HTTP %d): %s",
-					status, strings.TrimSpace(string(body)))
+				rejects.report("heartbeat", status, string(body))
 			}
 		}
 
@@ -534,7 +594,15 @@ func main() {
 			pollTasks()
 		}
 
-		time.Sleep(pollInterval)
+		// Пауза до следующего круга. Служба должна останавливаться сразу, а не
+		// досыпать свои 15 секунд: Windows ждёт ответа ограниченное время и
+		// иначе пишет в журнал, что служба не отвечает.
+		select {
+		case <-stop:
+			log.Println("остановка агента")
+			return
+		case <-time.After(pollInterval):
+		}
 	}
 }
 

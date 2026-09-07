@@ -3,10 +3,9 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"os"
-	"unsafe"
+
+	"netadmin/internal/wincon"
 )
 
 // checkInventory показывает, что агент соберёт с этой машины. Нули там, где
@@ -47,21 +46,6 @@ func checkInventory() int {
 	return problems
 }
 
-// holdWindow не даёт окну закрыться, когда агент запустили двойным щелчком:
-// сообщение об ошибке иначе исчезает раньше, чем его успевают прочитать.
-//
-// Признак запуска из проводника — единственный процесс на консоли: при запуске
-// из cmd или PowerShell там есть ещё и оболочка.
-func holdWindow() {
-	var pids [2]uint32
-	n, _, _ := procGetConsoleProcessList.Call(
-		uintptr(unsafe.Pointer(&pids[0])), uintptr(len(pids)))
-	if n != 1 {
-		return // запущено из консоли — она никуда не денется
-	}
-	fmt.Print("\nНажмите Enter, чтобы закрыть окно...")
-	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
-}
-
-// modkernel32 объявлен в tasks_windows.go — здесь берём из него ещё одну функцию.
-var procGetConsoleProcessList = modkernel32.NewProc("GetConsoleProcessList")
+// holdWindow не даёт окну закрыться, если файл запущен двойным щелчком.
+// Реализация общая с сервером — см. internal/wincon.
+func holdWindow() { wincon.Hold() }

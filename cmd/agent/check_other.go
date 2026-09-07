@@ -2,6 +2,8 @@
 
 package main
 
+import "netadmin/internal/wincon"
+
 import "fmt"
 
 // checkInventory — на не-Windows агент шлёт только метрики, инвентарь
@@ -13,4 +15,4 @@ func checkInventory() int {
 }
 
 // holdWindow нужен только там, где агент запускают двойным щелчком.
-func holdWindow() {}
+func holdWindow() { wincon.Hold() }

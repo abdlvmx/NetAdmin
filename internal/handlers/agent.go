@@ -78,64 +78,83 @@ type agentEnvelope struct {
 	Nonce     string `json:"nonce"`
 }
 
-// agentKey выбирает ключ HMAC: enrollment-токен из настроек либо персональный
-// токен устройства по его id. Сам ключ в запросе не передаётся.
-func (a *App) agentKey(r *http.Request) (deviceID int64, enroll bool, key string, ok bool) {
+// agentKeys выбирает ключи HMAC, которыми может быть подписан запрос.
+//
+// У зарегистрированного устройства ключ ровно один — его персональный токен.
+// При первичной регистрации подойти может любой действующий: постоянный токен
+// из настроек (им пользуются install_agent.bat и скрипты раскатки) или
+// одноразовый код. Сам ключ в запросе не передаётся, поэтому какой именно
+// подошёл, выясняется проверкой подписи.
+func (a *App) agentKeys(r *http.Request) (deviceID int64, enroll bool, keys []string, ok bool) {
 	if r.Header.Get(hdrEnroll) != "" {
-		k := config.Load().AgentToken
-		if k == "" {
-			return 0, false, "", false
+		if k := config.Load().AgentToken; k != "" {
+			keys = append(keys, k)
 		}
-		return 0, true, k, true
+		keys = append(keys, a.activeEnrollKeys()...)
+		if len(keys) == 0 {
+			return 0, false, nil, false
+		}
+		return 0, true, keys, true
 	}
 	id, err := strconv.ParseInt(r.Header.Get(hdrDevice), 10, 64)
 	if err != nil || id <= 0 {
-		return 0, false, "", false
+		return 0, false, nil, false
 	}
 	var tok string
 	if a.DB.QueryRow("SELECT COALESCE(agent_token,'') FROM devices WHERE id=?", id).Scan(&tok) != nil || tok == "" {
-		return 0, false, "", false
+		return 0, false, nil, false
 	}
-	return id, false, tok, true
+	return id, false, []string{tok}, true
 }
 
-// checkSig сверяет подпись над signed и проверяет свежесть и неповторность запроса.
-func (a *App) checkSig(w http.ResponseWriter, r *http.Request, key string, signed []byte, env agentEnvelope) bool {
+// checkSig сверяет подпись над signed и проверяет свежесть и неповторность
+// запроса. Возвращает подошедший ключ: им же подписывается ответ, а по нему же
+// видно, каким кодом регистрируется устройство.
+func (a *App) checkSig(w http.ResponseWriter, r *http.Request, keys []string, signed []byte, env agentEnvelope) (string, bool) {
 	sig := r.Header.Get(hdrSig)
 	if sig == "" {
 		a.rejectAgent(r, "нет подписи")
 		http.Error(w, "signature required", http.StatusForbidden)
-		return false
+		return "", false
 	}
-	mac := hmac.New(sha256.New, []byte(key))
-	mac.Write(signed)
-	if !hmac.Equal([]byte(sig), []byte(hex.EncodeToString(mac.Sum(nil)))) {
+
+	matched := ""
+	for _, k := range keys {
+		mac := hmac.New(sha256.New, []byte(k))
+		mac.Write(signed)
+		if hmac.Equal([]byte(sig), []byte(hex.EncodeToString(mac.Sum(nil)))) {
+			matched = k
+			break
+		}
+	}
+	if matched == "" {
 		a.rejectAgent(r, "неверная подпись")
 		http.Error(w, "bad signature", http.StatusForbidden)
-		return false
+		return "", false
 	}
+
 	if env.Timestamp == 0 {
 		a.rejectAgent(r, "нет timestamp")
 		http.Error(w, "stale request", http.StatusForbidden)
-		return false
+		return "", false
 	}
 	now := time.Now()
 	if d := now.Sub(time.Unix(env.Timestamp, 0)); d > agentClockSkew || d < -agentClockSkew {
 		a.rejectAgent(r, "просроченный timestamp")
 		http.Error(w, "stale request", http.StatusForbidden)
-		return false
+		return "", false
 	}
 	if env.Nonce == "" {
 		a.rejectAgent(r, "нет nonce")
 		http.Error(w, "nonce required", http.StatusForbidden)
-		return false
+		return "", false
 	}
 	if !agentNonces.use(env.Nonce, now) {
 		a.rejectAgent(r, "повтор запроса (replay)")
 		http.Error(w, "replayed request", http.StatusForbidden)
-		return false
+		return "", false
 	}
-	return true
+	return matched, true
 }
 
 // touchDevice отмечает, что агент только что выходил на связь.
@@ -157,7 +176,7 @@ func (a *App) touchDevice(deviceID int64) {
 
 // authAgentPost проверяет POST-запрос агента: подпись над телом, свежесть, nonce.
 func (a *App) authAgentPost(w http.ResponseWriter, r *http.Request) (agentReq, bool) {
-	deviceID, enroll, key, ok := a.agentKey(r)
+	deviceID, enroll, keys, ok := a.agentKeys(r)
 	if !ok {
 		http.Error(w, "unknown agent", http.StatusUnauthorized)
 		return agentReq{}, false
@@ -169,7 +188,8 @@ func (a *App) authAgentPost(w http.ResponseWriter, r *http.Request) (agentReq, b
 	}
 	var env agentEnvelope
 	_ = json.Unmarshal(body, &env)
-	if !a.checkSig(w, r, key, body, env) {
+	key, ok := a.checkSig(w, r, keys, body, env)
+	if !ok {
 		return agentReq{}, false
 	}
 	a.touchDevice(deviceID)
@@ -179,14 +199,15 @@ func (a *App) authAgentPost(w http.ResponseWriter, r *http.Request) (agentReq, b
 // authAgentGet проверяет GET-запрос агента. Тела нет, поэтому подписывается
 // метод и полный URI, а timestamp и nonce берутся из query-параметров.
 func (a *App) authAgentGet(w http.ResponseWriter, r *http.Request) (agentReq, bool) {
-	deviceID, enroll, key, ok := a.agentKey(r)
+	deviceID, enroll, keys, ok := a.agentKeys(r)
 	if !ok {
 		http.Error(w, "unknown agent", http.StatusUnauthorized)
 		return agentReq{}, false
 	}
 	ts, _ := strconv.ParseInt(r.URL.Query().Get("ts"), 10, 64)
 	env := agentEnvelope{Timestamp: ts, Nonce: r.URL.Query().Get("nonce")}
-	if !a.checkSig(w, r, key, []byte(r.Method+"\n"+r.URL.RequestURI()), env) {
+	key, ok := a.checkSig(w, r, keys, []byte(r.Method+"\n"+r.URL.RequestURI()), env)
+	if !ok {
 		return agentReq{}, false
 	}
 	a.touchDevice(deviceID)
@@ -209,6 +230,14 @@ func writeAgentJSON(w http.ResponseWriter, key string, v any) {
 }
 
 // rejectAgent фиксирует отклонённый запрос агента как событие безопасности.
+// logAgentEvent пишет заметное, но не тревожное событие про агента: оно должно
+// остаться в истории устройства, чтобы «почему у машины сменился токен» имело
+// ответ.
+func (a *App) logAgentEvent(hostname, message string) {
+	a.DB.Exec(`INSERT INTO events (hostname, source, event_id, severity, category, message)
+		VALUES (?, 'agent', 0, 'info', 'enroll', ?)`, hostname, message)
+}
+
 func (a *App) rejectAgent(r *http.Request, reason string) {
 	a.DB.Exec(`INSERT INTO events (hostname, source, event_id, severity, category, message)
 		VALUES (?, 'security', 0, 'warning', 'replay', ?)`,
@@ -263,13 +292,22 @@ func (a *App) AgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		case err != nil:
 			http.Error(w, "db error", http.StatusInternalServerError)
 			return
-		case existing != "":
-			// У устройства уже есть действующий токен. Перевыпуск по одному лишь
-			// enrollment-токену позволил бы перехватить чужое устройство, назвавшись
-			// его именем, поэтому для переустановки агента токен сначала отзывают.
+		case existing != "" && !a.isEnrollCode(ag.Key):
+			// У устройства уже есть действующий токен. Перевыпуск по постоянному
+			// токену позволил бы перехватить чужое устройство, назвавшись его
+			// именем: этот токен есть у всех, кто когда-либо ставил агента.
 			a.rejectAgent(r, "повторная регистрация занятого устройства: "+d.Hostname)
 			http.Error(w, "device already enrolled", http.StatusConflict)
 			return
+		case existing != "":
+			// А одноразовым кодом — можно: его выдал администратор считаные
+			// минуты назад и на считаное число установок, то есть переустановку
+			// он и подразумевает. Прежний токен при этом перестаёт работать.
+			//
+			// Без этого переустановленный агент так и не получал персонального
+			// токена и продолжал подписываться кодом — до его истечения, после
+			// чего машина уходила в оффлайн при работающем агенте.
+			a.logAgentEvent(d.Hostname, "переустановка агента по одноразовому коду")
 		}
 		issuedToken = randToken()
 		if _, e := a.DB.Exec("UPDATE devices SET agent_token=? WHERE id=?", issuedToken, id); e != nil {
@@ -277,6 +315,10 @@ func (a *App) AgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		deviceID = id
+		// Установка засчитывается только здесь — по факту выданного токена.
+		// Если запрос подписан постоянным токеном, строки с таким кодом нет
+		// и обновление никого не трогает.
+		a.useEnrollCode(ag.Key)
 	}
 
 	// Asset Change Tracking: фиксируем изменения железа/ОС (до обновления)

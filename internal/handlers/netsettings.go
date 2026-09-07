@@ -173,3 +173,40 @@ func (a *App) RestartServer(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/settings?message=restarting", http.StatusSeeOther)
 }
+
+// InstallLocalAgent — POST /settings/agent-install-local (admin): поставить
+// агента на машину, где работает сервер.
+func (a *App) InstallLocalAgent(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil || !user.IsAdmin() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if a.InstallAgent == nil {
+		settingsError(w, r, "Установка с этой страницы недоступна: сервер собран без встроенного агента.")
+		return
+	}
+	cfg := config.Load()
+	if strings.TrimSpace(cfg.AgentToken) == "" {
+		settingsError(w, r, "Не задан токен агента.")
+		return
+	}
+
+	// Локальному агенту адрес сервера нужен через петлю, а не через адрес
+	// интерфейса: машина та же, и смена IP не должна разрывать связь.
+	if _, err := a.InstallAgent(localServerURL(r), cfg.AgentToken); err != nil {
+		settingsError(w, r, "Не удалось установить агента: "+err.Error())
+		return
+	}
+	auth.LogAction(a.DB, user.ID, "install_agent_local", "settings", "")
+	http.Redirect(w, r, "/settings?message=agent_installed", http.StatusSeeOther)
+}
+
+// localServerURL — адрес сервера для агента на этой же машине.
+func localServerURL(r *http.Request) string {
+	_, port, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		return "http://127.0.0.1:8765"
+	}
+	return "http://" + net.JoinHostPort("127.0.0.1", port)
+}

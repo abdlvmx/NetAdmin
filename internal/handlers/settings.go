@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"netadmin/internal/agentbin"
 	"netadmin/internal/auth"
 	"netadmin/internal/backup"
 	"netadmin/internal/config"
@@ -37,6 +38,10 @@ type settingsData struct {
 	// какой вписать в установщик.
 	ServerAddrs []serverAddr
 	PickedAddr  string
+	// Готовая команда установки агента и признак того, что сборка агента
+	// загружена: без неё команда не сработает, и предлагать её нельзя.
+	EnrollCmd   string
+	AgentUpload bool
 	// Сетевые настройки: значения из config.json и то, что действует сейчас.
 	// Источник показывается, чтобы «задал, а не применилось» не превращалось
 	// в поиск вслепую — переменная окружения перекрывает настройку.
@@ -48,8 +53,12 @@ type settingsData struct {
 	PendingRestore bool
 	// CanRestart — сервер умеет перезапустить себя сам (установлен службой).
 	CanRestart bool
-	Message    string
-	Error      string
+	// CanInstallLocalAgent — агента можно поставить на эту машину одной кнопкой.
+	CanInstallLocalAgent bool
+	// EnrollCodes — действующие одноразовые коды регистрации.
+	EnrollCodes []enrollCode
+	Message     string
+	Error       string
 }
 
 // backupDir — каталог копий по текущим настройкам.
@@ -65,6 +74,7 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := config.Load()
+	_, hasAgentBuild := a.latestAgentBuild()
 	var backups []backup.Info
 	if dir, err := backupDir(cfg); err == nil {
 		backups = backup.List(dir)
@@ -91,13 +101,17 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 
 		ServerAddrs: localIPv4s(),
 		PickedAddr:  hostOnly(agentServerURL(r)),
+		EnrollCmd:   enrollCommand(agentServerURL(r), cfg.AgentToken),
+		AgentUpload: hasAgentBuild,
 
-		ListenAddr:      cfg.ListenAddr,
-		AllowSubnets:    cfg.AllowSubnets,
-		ListenEffective: cfg.ListenAddrSetting(),
-		AllowEffective:  cfg.AllowSubnetsSetting(),
-		PendingRestore:  backup.Pending(config.DBPath()),
-		CanRestart:      a.Restart != nil,
+		ListenAddr:           cfg.ListenAddr,
+		AllowSubnets:         cfg.AllowSubnets,
+		ListenEffective:      cfg.ListenAddrSetting(),
+		AllowEffective:       cfg.AllowSubnetsSetting(),
+		PendingRestore:       backup.Pending(config.DBPath()),
+		CanRestart:           a.Restart != nil,
+		CanInstallLocalAgent: a.InstallAgent != nil && agentbin.Available(),
+		EnrollCodes:          a.listEnrollCodes(agentServerURL(r)),
 
 		Message: r.URL.Query().Get("message"),
 		Error:   r.URL.Query().Get("error"),
