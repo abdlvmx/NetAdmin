@@ -5,13 +5,13 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
 	"netadmin/internal/auth"
 	"netadmin/internal/backup"
 	"netadmin/internal/config"
+	"netadmin/internal/netiface"
 	"netadmin/internal/notify"
 	"netadmin/internal/web"
 )
@@ -241,73 +241,14 @@ func agentServerURL(r *http.Request) string {
 }
 
 // serverAddr — один адрес, по которому агенты могут обращаться к серверу.
-type serverAddr struct {
-	IP    string // 192.168.1.64
-	Iface string // Ethernet
-}
+// Выбор и порядок живут в internal/netiface: тем же списком пользуется
+// приветствие сервера в консоли, и расходиться они не должны.
+type serverAddr = netiface.Addr
 
-// localIPv4s перечисляет частные IPv4-адреса поднятых интерфейсов.
-//
-// Выбрать «правильный» автоматически нельзя: VPN-туннель или виртуальный
-// адаптер Docker/WSL забирает себе маршрут по умолчанию, и адрес, через который
-// уходит внешний трафик, оказывается не тем, по которому сервер виден машинам
-// этажа. Поэтому сервер показывает все варианты, а выбирает администратор —
-// он один знает, в какой подсети стоят компьютеры.
-func localIPv4s() []serverAddr {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil
-	}
-	var out []serverAddr
-	for _, i := range ifaces {
-		if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := i.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			n, ok := a.(*net.IPNet)
-			if !ok || n.IP.To4() == nil || !n.IP.IsPrivate() || n.IP.IsLinkLocalUnicast() {
-				continue
-			}
-			out = append(out, serverAddr{IP: n.IP.String(), Iface: i.Name})
-		}
-	}
-	// Физические адаптеры вперёд: первый пункт становится выбором по умолчанию,
-	// и им должен быть адрес настоящей сети, а не туннеля или виртуального
-	// коммутатора — по такому адресу агенты сервер не найдут.
-	sort.SliceStable(out, func(i, j int) bool {
-		return !virtualIface(out[i].Iface) && virtualIface(out[j].Iface)
-	})
-	return out
-}
-
-// virtualIface распознаёт по имени адаптеры, которые не ведут в локальную сеть:
-// VPN-туннели, Docker/WSL, виртуальные коммутаторы гипервизоров. Список имён
-// заведомо неполон, поэтому такие адреса не скрываются — только опускаются
-// ниже в выборе.
-func virtualIface(name string) bool {
-	n := strings.ToLower(name)
-	for _, mark := range []string{
-		"tun", "tap", "vpn", "wg", "wireguard", "zerotier", "tailscale",
-		"docker", "wsl", "vethernet", "virtualbox", "vmware", "hyper-v", "loopback",
-	} {
-		if strings.Contains(n, mark) {
-			return true
-		}
-	}
-	return false
-}
+func localIPv4s() []serverAddr { return netiface.LocalIPv4s() }
 
 // firstPrivateIPv4 — запасной вариант, когда выбирать не из чего.
-func firstPrivateIPv4() string {
-	if list := localIPv4s(); len(list) > 0 {
-		return list[0].IP
-	}
-	return ""
-}
+func firstPrivateIPv4() string { return netiface.First() }
 
 // UpdateNotifications — POST /settings/notifications (admin).
 func (a *App) UpdateNotifications(w http.ResponseWriter, r *http.Request) {

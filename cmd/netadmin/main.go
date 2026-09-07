@@ -23,6 +23,7 @@ import (
 	"netadmin/internal/handlers"
 	"netadmin/internal/ingest"
 	"netadmin/internal/netaccess"
+	"netadmin/internal/netiface"
 )
 
 func main() {
@@ -187,31 +188,40 @@ func runBackups(d *sql.DB) {
 	}
 }
 
+// splitAddrs возвращает адреса для агентов и публичные адреса, которых на
+// машине быть не должно.
+//
+// Частные адреса берутся из netiface — с тем же порядком, что и в выборе на
+// странице «Настройки»: первым идёт самый правдоподобный. Раньше здесь был
+// свой обход интерфейсов без всякого порядка, и приветствие советовало агентам
+// первый попавшийся адрес — на машине с Docker это оказывался 172.18.0.1,
+// по которому не подключится никто.
+func splitAddrs() (lan, public []string) {
+	for _, a := range netiface.LocalIPv4s() {
+		lan = append(lan, a.IP)
+	}
+
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return lan, nil
+	}
+	for _, a := range addrs {
+		n, ok := a.(*net.IPNet)
+		if !ok || n.IP.IsLoopback() || n.IP.To4() == nil {
+			continue
+		}
+		if !n.IP.IsPrivate() && !n.IP.IsLinkLocalUnicast() {
+			public = append(public, n.IP.String())
+		}
+	}
+	return lan, public
+}
+
 // logReachableAddrs печатает адреса, по которым сервер доступен агентам,
 // и предупреждает, если среди них есть публичный: продукт не предназначен
 // для работы за пределами локальной сети.
 func logReachableAddrs(port string) {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return
-	}
-	var lan, public []string
-	for _, a := range addrs {
-		n, ok := a.(*net.IPNet)
-		if !ok || n.IP.IsLoopback() || n.IP.To4() == nil {
-			continue // в подсказке для агентов показываем только IPv4
-		}
-		ip := n.IP.String()
-		switch {
-		case n.IP.IsLinkLocalUnicast():
-			// 169.254.x — адрес самоназначения при неработающем DHCP,
-			// подсказывать его для агентов бессмысленно
-		case n.IP.IsPrivate():
-			lan = append(lan, ip)
-		default:
-			public = append(public, ip)
-		}
-	}
+	lan, public := splitAddrs()
 	for _, ip := range lan {
 		log.Printf("Адрес для агентов: NETADMIN_SERVER_URL=http://%s:%s", ip, port)
 	}

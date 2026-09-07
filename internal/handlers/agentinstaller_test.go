@@ -183,29 +183,3 @@ func TestSettingsShowsServerAddresses(t *testing.T) {
 		}
 	}
 }
-
-// Первый в списке становится выбором по умолчанию, поэтому туннели и
-// виртуальные коммутаторы должны быть ниже физических адаптеров.
-func TestVirtualIfacesRankedLast(t *testing.T) {
-	for _, name := range []string{"happ-tun", "docker0", "vEthernet (WSL)", "wg0",
-		"Tailscale", "VirtualBox Host-Only Network", "tap0"} {
-		if !virtualIface(name) {
-			t.Errorf("%q должен считаться виртуальным", name)
-		}
-	}
-	for _, name := range []string{"Ethernet", "Wi-Fi", "eth0", "Подключение по локальной сети"} {
-		if virtualIface(name) {
-			t.Errorf("%q — обычный адаптер, не виртуальный", name)
-		}
-	}
-	// порядок: физические раньше виртуальных
-	got := localIPv4s()
-	seenVirtual := false
-	for _, a := range got {
-		if virtualIface(a.Iface) {
-			seenVirtual = true
-		} else if seenVirtual {
-			t.Errorf("физический адаптер %s (%s) оказался после виртуального", a.IP, a.Iface)
-		}
-	}
-}
