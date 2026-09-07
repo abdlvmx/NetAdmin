@@ -48,22 +48,25 @@ func main() {
 
 	switch {
 	case *restart:
-		if err := restartServer(); err != nil {
-			fmt.Println("ОШИБКА:", err)
+		// Перезапуск тоже требует прав: раньше он единственный их не запрашивал
+		// и падал с сырым «Access is denied» ровно там, куда интерфейс сам же
+		// и посылает — на страницу настроек с кнопкой «Перезапустить сервер».
+		runServiceCommand([]string{"-restart"}, restartServer)
+		return
+	case *install, *uninstall:
+		if *firewall && *noFirewall {
+			fmt.Println("ОШИБКА: заданы сразу -firewall и -no-firewall — непонятно, " +
+				"открывать порт или нет. Оставьте один флаг.")
 			holdWindow()
 			os.Exit(1)
 		}
-		return
-	case *install, *uninstall:
-		args := []string{"-install"}
 		if *uninstall {
-			args = []string{"-uninstall"}
-		} else if *firewall {
-			args = append(args, "-firewall")
-		} else if *noFirewall {
-			args = append(args, "-no-firewall")
+			runServiceCommand([]string{"-uninstall"}, uninstallServer)
+			return
 		}
-		runServiceCommand(*uninstall, firewallFromFlags(*firewall, *noFirewall), args)
+		fw := firewallFromFlags(*firewall, *noFirewall)
+		runServiceCommand(append([]string{"-install"}, firewallArgs(fw)...),
+			func() error { return installServer(fw) })
 		return
 	case *status:
 		if err := printServerStatus(); err != nil {
@@ -98,7 +101,7 @@ func main() {
 		case choiceDemo:
 			*demoMode = true
 		case choiceInstall:
-			runServiceCommand(false, firewallAsk, []string{"-install"})
+			runServiceCommand([]string{"-install"}, func() error { return installServer(firewallAsk) })
 			return
 		case choiceSetup:
 			// обычный запуск, ничего менять не надо
@@ -144,7 +147,7 @@ func dataExists() bool {
 // Раньше без прав команда просто отказывалась с подсказкой «откройте консоль от
 // имени администратора» — для человека, скачавшего один файл, лишний шаг:
 // Windows умеет спросить сама.
-func runServiceCommand(uninstall bool, fw firewallChoice, elevateArgs []string) {
+func runServiceCommand(elevateArgs []string, do func() error) {
 	if runtime.GOOS == "windows" && !winsvc.Elevated() {
 		started, err := elevateSelf(elevateArgs...)
 		if err != nil {
@@ -156,13 +159,7 @@ func runServiceCommand(uninstall bool, fw firewallChoice, elevateArgs []string) 
 			return // работу продолжит запущенная с правами копия
 		}
 	}
-	var err error
-	if uninstall {
-		err = uninstallServer()
-	} else {
-		err = installServer(fw)
-	}
-	if err != nil {
+	if err := do(); err != nil {
 		fmt.Println("ОШИБКА:", err)
 		holdWindow()
 		os.Exit(1)
@@ -180,6 +177,25 @@ func firewallFromFlags(yes, no bool) firewallChoice {
 		return firewallYes
 	}
 	return firewallAsk
+}
+
+// firewallArgs — как передать решение о брандмауэре копии, запущенной с
+// правами.
+//
+// Аргументы выводятся из самого решения, а не собираются заново из флагов.
+// Раньше две ветки читали флаги по-разному: при -firewall и -no-firewall
+// сразу неповышенная копия выбирала «не трогать», а повышенная — «открыть»,
+// то есть одна команда означала разное по разные стороны UAC. Само сочетание
+// теперь отклоняется, но выводить аргументы из решения всё равно правильнее:
+// разойтись им больше негде.
+func firewallArgs(fw firewallChoice) []string {
+	switch fw {
+	case firewallYes:
+		return []string{"-firewall"}
+	case firewallNo:
+		return []string{"-no-firewall"}
+	}
+	return nil
 }
 
 // serve поднимает сервер со всеми фоновыми задачами и работает, пока не

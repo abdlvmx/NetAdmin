@@ -43,8 +43,15 @@ func (a *App) latestAgentBuild() (agentBuild, bool) {
 	err := a.DB.QueryRow(`SELECT COALESCE(filename,''), COALESCE(sha256,''), COALESCE(size,0)
 		FROM packages WHERE LOWER(COALESCE(original_name,''))='agent.exe'
 		ORDER BY id DESC LIMIT 1`).Scan(&b.Stored, &b.SHA256, &b.Size)
+	// Файл мог пропасть с диска, а строка в packages остаться: после
+	// восстановления базы из копии это штатный случай — копия снимается с
+	// базы, а каталог packages в неё не входит. Раньше /agent.exe отвечал
+	// «этот сервер собран без встроенного агента», хотя агент как раз внутри,
+	// и установка одной командой переставала работать без всякой причины.
 	if err == nil && b.Stored != "" && b.SHA256 != "" {
-		return b, true
+		if _, err := os.Stat(filepath.Join(packagesDir(), b.Stored)); err == nil {
+			return b, true
+		}
 	}
 	if data, sum, ok := agentEmbedded(); ok {
 		return agentBuild{SHA256: sum, Size: int64(len(data)), Embedded: true}, true
@@ -64,6 +71,18 @@ func (a *App) AgentBinary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		http.Error(w, "сборка агента недоступна: этот сервер собран без встроенного агента — "+
 			"загрузите agent.exe в разделе «Установка ПО»", http.StatusNotFound)
+		return
+	}
+
+	// Скрипт установки просит ровно ту сборку, о которой ему сказали. Если на
+	// сервере уже другая — это не подмена, а обычное обновление парка, и
+	// говорить о нём надо соответственно: прежде сумма и файл брались двумя
+	// запросами, и загрузка новой сборки между ними роняла идущие установки
+	// словами «файл повреждён или подменён» — штатное обновление выглядело
+	// как атака.
+	if want := r.URL.Query().Get("sha256"); want != "" && !strings.EqualFold(want, b.SHA256) {
+		http.Error(w, "сборка агента на сервере обновилась, пока шла установка: "+
+			"откройте «Настройки» и выполните команду установки заново", http.StatusConflict)
 		return
 	}
 
@@ -146,12 +165,21 @@ if (-not $t) {
 
 $tmp = Join-Path $env:TEMP 'netadmin-agent-setup.exe'
 Write-Host 'Загрузка агента...'
-Invoke-WebRequest -Uri "$srv/agent.exe" -OutFile $tmp -UseBasicParsing
+try {
+  Invoke-WebRequest -Uri "$srv/agent.exe?sha256=$sha" -OutFile $tmp -UseBasicParsing
+} catch {
+  $code = 0
+  try { $code = [int]$_.Exception.Response.StatusCode } catch {}
+  if ($code -eq 409) {
+    throw 'Сборка агента на сервере обновилась, пока шла установка. Откройте «Настройки» и выполните команду заново.'
+  }
+  throw "Не удалось загрузить агента с $srv : $($_.Exception.Message)"
+}
 
 $got = (Get-FileHash $tmp -Algorithm SHA256).Hash
 if ($got -ne $sha) {
   Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-  throw "Контрольная сумма не совпала: файл повреждён или подменён."
+  throw "Контрольная сумма не совпала: файл повреждён при загрузке или подменён. Повторите команду."
 }
 
 & $tmp -install "-server=$srv" "-token=$t"
