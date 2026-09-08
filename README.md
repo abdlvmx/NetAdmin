@@ -1,6 +1,7 @@
 # NetAdmin
 
 [![Release](https://img.shields.io/github/v/release/abdlvmx/NetAdmin?label=%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C&color=0078D6)](https://github.com/abdlvmx/NetAdmin/releases/latest)
+[![CI](https://github.com/abdlvmx/NetAdmin/actions/workflows/ci.yml/badge.svg)](https://github.com/abdlvmx/NetAdmin/actions/workflows/ci.yml)
 ![Go](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
