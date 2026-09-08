@@ -28,6 +28,7 @@ import (
 	"netadmin/internal/netaccess"
 	"netadmin/internal/netiface"
 	"netadmin/internal/notify"
+	"netadmin/internal/tz"
 	"netadmin/internal/version"
 	"netadmin/internal/web"
 	"netadmin/internal/winsvc"
@@ -54,6 +55,14 @@ func main() {
 	resetUser := flag.String("user", "",
 		"для -reset-password: чей пароль менять, если администраторов несколько")
 	flag.Parse()
+
+	// Часовой пояс показа — до всего остального: его показывают и приветствие,
+	// и -status, и он должен быть один во всех ответах. Отказ не смертелен:
+	// сервер работает в зоне самой машины и жалуется в журнал — показывать
+	// местное время с жалобой честнее, чем чужое молча.
+	if err := tz.Set(config.Load().Timezone); err != nil {
+		log.Printf("часовой пояс: %v; показываю время в зоне сервера", err)
+	}
 
 	switch {
 	case *showVersion:

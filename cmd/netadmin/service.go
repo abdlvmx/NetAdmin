@@ -15,6 +15,7 @@ import (
 
 	"netadmin/internal/agentbin"
 	"netadmin/internal/instdir"
+	"netadmin/internal/tz"
 	"netadmin/internal/version"
 	"netadmin/internal/winsvc"
 )
@@ -186,6 +187,7 @@ func printServerStatus() error {
 	// Версия печатается и у неустановленной службы: это версия файла, который
 	// сейчас запустили, и вопрос «что у меня за сборка» от установки не зависит.
 	fmt.Printf("  Версия:  %s\n", version.Full())
+	fmt.Printf("  Время:   %s\n", tz.Label())
 	if state == winsvc.StateNotInstalled {
 		fmt.Println("Установить: netadmin.exe -install (от имени администратора)")
 		return nil

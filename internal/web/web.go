@@ -109,7 +109,7 @@ func sizeMB(b int64) string {
 
 // dateTime — момент времени в московской зоне, как и остальные даты.
 func dateTime(t time.Time) string {
-	return t.In(tz.Loc).Format("02.01.2006 15:04")
+	return t.In(tz.Loc()).Format("02.01.2006 15:04")
 }
 
 // statusRu/statusBadge/prioRu/prioBadge — подписи и классы бейджей для заявок helpdesk.

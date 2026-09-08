@@ -228,7 +228,7 @@ go build -o agent.exe    ./cmd/agent
 │   ├── netscan/       ping и сканирование сети (ICMP + ARP)
 │   ├── notify/        уведомления по SMTP
 │   ├── snmp/          опрос сетевого оборудования
-│   ├── tz/            московское время для отображения
+│   ├── tz/            часовой пояс показа (в базе — всегда UTC)
 │   ├── web/           встроенные шаблоны и статика (go:embed)
 │   └── winsvc/        установка и запуск службами Windows (сервер и агент)
 ├── deploy/            install_agent.bat, uninstall_agent.bat, firewall_server.bat

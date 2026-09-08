@@ -7,6 +7,7 @@ import (
 	"netadmin/internal/config"
 	"netadmin/internal/demo"
 	"netadmin/internal/netaccess"
+	"netadmin/internal/tz"
 	"netadmin/internal/version"
 	"netadmin/internal/wincon"
 )
@@ -102,6 +103,7 @@ func printServerBanner(port string, allow netaccess.List, allowSource string) {
 	bannerRule()
 	fmt.Println()
 	fmt.Printf("  Версия:    %s\n", version.Full())
+	fmt.Printf("  Время:     %s\n", tz.Label())
 	fmt.Printf("  Откройте:  http://127.0.0.1:%s\n", port)
 
 	lan, public := splitAddrs()

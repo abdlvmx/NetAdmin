@@ -83,6 +83,19 @@
       <form method="post" action="/settings/organization">
         <div class="form-group"><label>Название организации</label>
           <input name="organization_name" value="{{.OrgName}}"></div>
+        <div class="form-group">
+          <label>Часовой пояс</label>
+          <select name="timezone">
+            {{range .Zones}}
+            <option value="{{.Name}}" {{if eq .Name $.Timezone}}selected{{end}}>{{.Title}} — {{.Offset}}</option>
+            {{end}}
+          </select>
+          <p class="text-muted" style="font-size:12px;margin-top:6px">
+            В нём показывается всё время: список устройств, графики, журнал
+            действий, заявки и письма. В базе время всегда хранится по UTC,
+            поэтому смена пояса ничего не портит и применяется сразу.
+            Сейчас: <b>{{.TimezoneLabel}}</b>.</p>
+        </div>
         <div class="modal-footer"><button class="btn btn-primary">Сохранить</button></div>
       </form>
     </div>
