@@ -105,6 +105,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/organization", a.UpdateOrganization)
 	mux.HandleFunc("POST /settings/agent-token/rotate", a.RotateAgentToken)
 	mux.HandleFunc("GET /settings/agent-installer", a.AgentInstaller)
+	// готовый установщик: агент с уже вписанными адресом и ключом
+	mux.HandleFunc("GET /settings/agent-setup.exe", a.AgentSetupExe)
 	// Установка агента одной командой: скрипт и сборка отдаются без сессии —
 	// команда выполняется на машине, где сессии нет (см. enroll.go).
 	mux.HandleFunc("GET /enroll.ps1", a.EnrollScript)
@@ -125,6 +127,7 @@ func (a *App) Routes() http.Handler {
 	// Одноразовые коды регистрации агентов — см. enrollcodes.go
 	mux.HandleFunc("POST /settings/enroll-code", a.CreateEnrollCode)
 	mux.HandleFunc("POST /settings/enroll-code/{id}/revoke", a.RevokeEnrollCode)
+	mux.HandleFunc("GET /settings/enroll-code/{id}/installer", a.EnrollCodeInstaller)
 
 	// Мониторинг сервисов (HTTP/TCP/DNS/…)
 	mux.HandleFunc("GET /monitoring", a.ServiceMonitorPage)

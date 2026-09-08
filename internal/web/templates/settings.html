@@ -125,6 +125,14 @@
               <button class="btn btn-ghost">Отозвать</button>
             </form>
           </div>
+          {{if $.AgentUpload}}
+          <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <a class="btn" href="/settings/enroll-code/{{.ID}}/installer?host={{$.PickedAddr}}">Скачать готовый файл</a>
+            <span class="text-muted" style="font-size:12px">
+              Тот же код внутри агента: положить на общую папку, запустить двойным
+              щелчком — ни консоли, ни набора команды.</span>
+          </div>
+          {{end}}
         </div>
         {{end}}
       </div>
@@ -154,10 +162,20 @@
 
       <details style="margin-top:14px">
         <summary class="text-muted" style="font-size:12px;cursor:pointer">Установка файлом, без команды</summary>
+
+        {{if .AgentUpload}}
         <p class="text-muted" style="font-size:12px;margin:10px 0">
-          Если PowerShell на устройствах закрыт политикой: скачайте установщик —
-          адрес сервера и токен уже вписаны. На компьютере положите рядом
-          <b>agent.exe</b> и запустите файл от имени администратора.
+          <b>Готовый агент с постоянным токеном.</b> Тот же файл, что и по кнопке
+          рядом с кодом, но ключ в нём не истекает: такой можно оставить на общей
+          папке надолго. Отзывается сменой токена в разделе «Токен агента» ниже.</p>
+        <a class="btn" href="/settings/agent-setup.exe?host={{.PickedAddr}}">Скачать агента с настройками</a>
+        <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+        {{end}}
+
+        <p class="text-muted" style="font-size:12px;margin:10px 0">
+          <b>Старый способ, через .bat.</b> Скачайте установщик — адрес сервера и
+          токен уже вписаны. На компьютере положите рядом <b>agent.exe</b> и
+          запустите файл от имени администратора.
           {{if .AgentUpload}}Сам <b>agent.exe</b> — по ссылке
           <a href="/agent.exe">/agent.exe</a> с этого сервера.{{end}}</p>
         {{if .ServerAddrs}}

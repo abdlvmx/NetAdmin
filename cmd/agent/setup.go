@@ -19,27 +19,45 @@ import (
 // Теперь он спрашивает адрес сервера и код регистрации, а потом ставит себя
 // службой, запросив права через UAC.
 
-// askSetup спрашивает адрес сервера и код регистрации и подтверждение.
+// askSetup спрашивает то, чего ещё не знает, и просит подтверждения.
+//
+// knownServer и knownCode приходят из файла, который сервер отдал уже
+// настроенным (см. internal/agentcfg). Ради этого файл и делался: спрашивать
+// адрес и сорокатрёхзначный код у человека, который просто запустил положенную
+// на сетевую папку программу, значит вернуть ему ровно ту работу, от которой
+// его избавляли. Пустые значения означают «спросить», как было раньше.
 //
 // Отделено от самой установки намеренно: диалог можно проверить тестами, не
 // заводя службу на машине, где эти тесты идут.
-func askSetup() (server, code string, ok bool) {
-	fmt.Println("  Оба значения показывает страница сервера:")
-	fmt.Println("  Настройки → Установка агента.")
-	fmt.Println()
+func askSetup(knownServer, knownCode string) (server, code string, ok bool) {
+	srv, c := knownServer, knownCode
+	baked := srv != "" && c != ""
 
-	srv, ok := askUntil("  Адрес сервера (например 192.168.1.10:8765): ")
-	if !ok {
-		return "", "", false
-	}
-	c, ok := askUntil("  Код регистрации: ")
-	if !ok {
-		return "", "", false
+	if !baked {
+		fmt.Println("  Недостающее показывает страница сервера:")
+		fmt.Println("  Настройки → Установка агента.")
+		fmt.Println()
+
+		// Спрашиваем только то, чего не знаем: половина значений могла прийти
+		// из файла, и переспрашивать её незачем.
+		if srv == "" {
+			if srv, ok = askUntil("  Адрес сервера (например 192.168.1.10:8765): "); !ok {
+				return "", "", false
+			}
+		}
+		if c == "" {
+			if c, ok = askUntil("  Код регистрации: "); !ok {
+				return "", "", false
+			}
+		}
 	}
 
 	full := normalizeServerURL(srv)
 	fmt.Println()
 	fmt.Printf("  Сервер: %s\n", full)
+	if baked {
+		fmt.Println("  Адрес и код регистрации вписаны в этот файл сервером.")
+	}
 	fmt.Println("  Агент будет установлен службой и запустится при загрузке.")
 	fmt.Println()
 	if !wincon.AskYesNo("  Продолжить?") {
@@ -118,7 +136,14 @@ func runInteractiveSetup() {
 	fmt.Println()
 
 	if confirmReconfigure() {
-		if server, code, ok := askSetup(); ok {
+		// Вшитые в файл значения предлагаем как есть. Настройки из файла рядом
+		// или из окружения не предлагаем: там агент уже настроен, и раз человек
+		// запустил установку, он пришёл что-то изменить.
+		var srv, code string
+		if settingsSource == sourceBaked {
+			srv, code = rawServerURL, token
+		}
+		if server, code, ok := askSetup(srv, code); ok {
 			applySetup(server, code)
 		}
 	}
