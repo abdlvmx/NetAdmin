@@ -14,6 +14,7 @@ import (
 	"netadmin/internal/config"
 	"netadmin/internal/netiface"
 	"netadmin/internal/notify"
+	"netadmin/internal/version"
 	"netadmin/internal/web"
 )
 
@@ -66,8 +67,11 @@ type settingsData struct {
 	CanInstallLocalAgent bool
 	// EnrollCodes — действующие одноразовые коды регистрации.
 	EnrollCodes []enrollCode
-	Message     string
-	Error       string
+	// Version — версия сборки сервера. Показывается, чтобы на вопрос «какая у
+	// вас версия» можно было ответить, не открывая консоль.
+	Version string
+	Message string
+	Error   string
 }
 
 // backupDir — каталог копий по текущим настройкам.
@@ -133,6 +137,8 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		CanRestart:           a.Restart != nil,
 		CanInstallLocalAgent: a.InstallAgent != nil && agentbin.Available(),
 		EnrollCodes:          a.listEnrollCodes(agentServerURL(r)),
+
+		Version: version.Full(),
 
 		Message: r.URL.Query().Get("message"),
 		Error:   r.URL.Query().Get("error"),

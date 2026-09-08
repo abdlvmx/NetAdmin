@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"netadmin/internal/version"
 	"netadmin/internal/wincon"
 	"netadmin/internal/winsvc"
 
@@ -37,7 +38,11 @@ import (
 
 // agentVersion — версия сборки агента. Уходит в heartbeat, чтобы на сервере
 // было видно, какие машины ещё не обновились.
-const agentVersion = "1.1.0"
+//
+// Номер общий с сервером: собираются они из одного дерева и уезжают одним
+// релизом (см. internal/version). Раньше он жил здесь константой — и версия
+// была только у агента, а сервер о своей не знал ничего.
+var agentVersion = version.Value
 
 // serverURL и token заполняет loadSettings в начале main: источников теперь два
 // (файл настроек рядом с агентом и переменные окружения), и выбирать между ними

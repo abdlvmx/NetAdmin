@@ -27,6 +27,7 @@ import (
 	"netadmin/internal/ingest"
 	"netadmin/internal/netaccess"
 	"netadmin/internal/netiface"
+	"netadmin/internal/version"
 	"netadmin/internal/web"
 	"netadmin/internal/winsvc"
 )
@@ -45,9 +46,16 @@ func main() {
 		"при установке открыть порт 8765 в брандмауэре без вопросов")
 	noFirewall := flag.Bool("no-firewall", false,
 		"при установке не трогать брандмауэр")
+	showVersion := flag.Bool("version", false,
+		"показать версию сборки и выйти")
 	flag.Parse()
 
 	switch {
+	case *showVersion:
+		// Прав не требует и ничего не открывает: на вопрос «какая у вас версия»
+		// нужно уметь ответить, не запуская сервер.
+		fmt.Println("NetAdmin " + version.Full())
+		return
 	case *restart:
 		// Перезапуск тоже требует прав: раньше он единственный их не запрашивал
 		// и падал с сырым «Access is denied» ровно там, куда интерфейс сам же

@@ -15,6 +15,7 @@ import (
 
 	"netadmin/internal/agentbin"
 	"netadmin/internal/instdir"
+	"netadmin/internal/version"
 	"netadmin/internal/winsvc"
 )
 
@@ -88,6 +89,7 @@ func installServer(firewall firewallChoice) error {
 	}
 
 	fmt.Println("Служба NetAdmin установлена и запущена.")
+	fmt.Printf("  Версия:             %s\n", version.Full())
 	fmt.Printf("  Программа и данные: %s\n", dir)
 	if tightened {
 		fmt.Println("  Доступ к каталогу ограничен SYSTEM и администраторами (был открыт).")
@@ -181,6 +183,9 @@ func printServerStatus() error {
 		return err
 	}
 	fmt.Printf("Служба %s: %s\n", serviceName, state)
+	// Версия печатается и у неустановленной службы: это версия файла, который
+	// сейчас запустили, и вопрос «что у меня за сборка» от установки не зависит.
+	fmt.Printf("  Версия:  %s\n", version.Full())
 	if state == winsvc.StateNotInstalled {
 		fmt.Println("Установить: netadmin.exe -install (от имени администратора)")
 		return nil
@@ -206,6 +211,10 @@ func startServiceLog() {
 		return // писать некуда — работаем без журнала, но не падаем
 	}
 	log.SetOutput(f)
+	// Первой строкой — какая это сборка. Журнал службы — единственный след
+	// происходившего, и разбирать его, не зная версии, значит гадать, к какому
+	// коду относятся сообщения. Заодно строка отмечает границу перезапуска.
+	log.Printf("NetAdmin %s запускается", version.Full())
 }
 
 // shortcutPath — ярлык на общем рабочем столе. Формат .url выбран вместо .lnk
