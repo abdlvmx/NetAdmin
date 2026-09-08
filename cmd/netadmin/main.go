@@ -27,6 +27,7 @@ import (
 	"netadmin/internal/ingest"
 	"netadmin/internal/netaccess"
 	"netadmin/internal/netiface"
+	"netadmin/internal/version"
 	"netadmin/internal/web"
 	"netadmin/internal/winsvc"
 )
@@ -45,9 +46,32 @@ func main() {
 		"при установке открыть порт 8765 в брандмауэре без вопросов")
 	noFirewall := flag.Bool("no-firewall", false,
 		"при установке не трогать брандмауэр")
+	showVersion := flag.Bool("version", false,
+		"показать версию сборки и выйти")
+	resetPw := flag.Bool("reset-password", false,
+		"задать новый пароль администратору, потерявшему доступ (спросит, кому)")
+	resetUser := flag.String("user", "",
+		"для -reset-password: чей пароль менять, если администраторов несколько")
 	flag.Parse()
 
 	switch {
+	case *showVersion:
+		// Прав не требует и ничего не открывает: на вопрос «какая у вас версия»
+		// нужно уметь ответить, не запуская сервер.
+		fmt.Println("NetAdmin " + version.Full())
+		return
+	case *resetPw:
+		runServiceCommand(resetPasswordArgs(*resetUser),
+			func() error { return resetPassword(*resetUser) })
+		return
+	case *resetUser != "":
+		// Сам по себе -user ничего не значит, а молча запустить вместо смены
+		// пароля обычный сервер — худший из возможных ответов: человек решит,
+		// что пароль сменён.
+		fmt.Println("ОШИБКА: -user задаётся вместе с -reset-password. " +
+			"Пароль меняет netadmin.exe -reset-password -user=" + *resetUser)
+		holdWindow()
+		os.Exit(1)
 	case *restart:
 		// Перезапуск тоже требует прав: раньше он единственный их не запрашивал
 		// и падал с сырым «Access is denied» ровно там, куда интерфейс сам же

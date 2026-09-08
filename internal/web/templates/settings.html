@@ -369,6 +369,21 @@
     <div class="card">
       <div class="card-header"><span class="card-title">Пароль</span></div>
       <p class="text-muted" style="font-size:13px">Смена пароля — на странице <a href="/profile" style="color:var(--accent)">Профиль</a>.</p>
+      <p class="text-muted" style="font-size:12.5px;margin-top:8px">
+        Единственный администратор, потерявший пароль, восстанавливает доступ с
+        консоли сервера: <code>netadmin.exe -reset-password</code> от имени
+        администратора компьютера.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">О программе</span></div>
+      <p style="font-size:13px">Версия <b>{{.Version}}</b></p>
+      <p class="text-muted" style="font-size:12.5px;margin-top:8px">
+        Номер до точки — поколение продукта, после разделителя — ревизия
+        исходников, из которой собран этот файл. Приложите строку целиком к
+        сообщению об ошибке: по ней видно, о какой именно сборке речь. То же
+        показывают <code>netadmin.exe -version</code> и первая строка журнала
+        службы.</p>
     </div>
   </div>
 </div>

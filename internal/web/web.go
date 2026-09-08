@@ -59,6 +59,24 @@ func Static() http.Handler {
 	}))
 }
 
+// Favicon отдаёт значок вкладки по корневому пути.
+//
+// Браузер просит /favicon.ico сам, не дожидаясь разбора страницы, и берёт его
+// же для закладки и журнала посещений — <link> в шаблоне этот запрос не
+// отменяет. Без маршрута каждая открытая страница оставляла бы в журнале 404.
+func Favicon() http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := staticFS.ReadFile("static/favicon.ico")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/x-icon")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(b)
+	})
+}
+
 // demoMode — режим витрины: страницы показывают, что данные вымышленные.
 // Ставится один раз при старте, до первого запроса, поэтому блокировка
 // не нужна.

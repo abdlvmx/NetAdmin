@@ -39,6 +39,9 @@ func (a *App) Routes() http.Handler {
 	// встроенные скрипты; доступны без сессии — страница входа тоже их грузит
 	mux.Handle("GET /static/", web.Static())
 
+	// Значок вкладки по корневому пути: браузер просит его сам и до входа тоже.
+	mux.HandleFunc("GET /favicon.ico", web.Favicon())
+
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})

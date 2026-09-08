@@ -7,6 +7,7 @@ import (
 	"netadmin/internal/config"
 	"netadmin/internal/demo"
 	"netadmin/internal/netaccess"
+	"netadmin/internal/version"
 	"netadmin/internal/wincon"
 )
 
@@ -74,6 +75,7 @@ func printDemoBanner(port string) {
 	fmt.Println("  NetAdmin — демонстрационный режим")
 	bannerRule()
 	fmt.Println()
+	fmt.Printf("  Версия:    %s\n", version.Full())
 	fmt.Printf("  Откройте:  http://127.0.0.1:%s\n", port)
 	fmt.Printf("  Вход:      %s  /  %s\n", demo.AdminUser, demo.AdminPassword)
 	fmt.Println()
@@ -99,6 +101,7 @@ func printServerBanner(port string, allow netaccess.List, allowSource string) {
 	fmt.Println("  NetAdmin работает")
 	bannerRule()
 	fmt.Println()
+	fmt.Printf("  Версия:    %s\n", version.Full())
 	fmt.Printf("  Откройте:  http://127.0.0.1:%s\n", port)
 
 	lan, public := splitAddrs()

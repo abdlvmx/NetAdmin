@@ -35,11 +35,16 @@ jobs:
         # Тогда установка агента не требует ничего загружать на сервер.
         #
         # -trimpath убирает пути сборочной машины из бинарника,
-        # -s -w выкидывают отладочную информацию (примерно -30% размера)
+        # -s -w выкидывают отладочную информацию (примерно -30% размера),
+        # -X проставляет номер версии из тега: без него оба файла ушли бы с
+        # значением по умолчанию из internal/version, и релиз v1.2.0 называл бы
+        # себя предыдущей версией. Имя символа сверяет TestReleaseStampsVersion.
         shell: pwsh
         run: |
-          go build -trimpath -ldflags "-s -w" -o internal/agentbin/bin/agent.exe ./cmd/agent
-          go build -trimpath -ldflags "-s -w" -o dist/netadmin.exe ./cmd/netadmin
+          $ver = "${{ github.ref_name }}" -replace '^v', ''
+          $ld = "-s -w -X netadmin/internal/version.Value=$ver"
+          go build -trimpath -ldflags $ld -o internal/agentbin/bin/agent.exe ./cmd/agent
+          go build -trimpath -ldflags $ld -o dist/netadmin.exe ./cmd/netadmin
           Copy-Item internal/agentbin/bin/agent.exe dist/agent.exe
 
       - name: Контрольные суммы
