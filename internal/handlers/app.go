@@ -202,6 +202,8 @@ func (a *App) Routes() http.Handler {
 	// JSON (инвентарь/мониторинг)
 	mux.HandleFunc("GET /api/metrics/fleet", a.FleetMetrics)
 	mux.HandleFunc("GET /api/devices/status", a.DevicesStatus)
+	// сколько машин уже с агентом: страница настроек ждёт первого подключения
+	mux.HandleFunc("GET /api/agents/enrolled", a.EnrolledAgents)
 	mux.HandleFunc("GET /api/devices/{id}/metrics", a.DeviceMetrics)
 	mux.HandleFunc("GET /api/devices/{id}/software", a.DeviceSoftware)
 	mux.HandleFunc("GET /api/devices/{id}/changes", a.DeviceChanges)

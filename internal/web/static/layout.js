@@ -186,6 +186,39 @@
   // Действия, общие для всех страниц.
   window.actions.theme = function () { toggleTheme(); };
   window.actions.selectAll = function (el) { el.select(); };
+  // Копирование в буфер. Выделения мало: команда установки уезжает на другую
+  // машину, и лишний шаг «теперь нажмите Ctrl+C» — тот самый, на котором
+  // строка теряется, стоит случайно кликнуть мимо.
+  //
+  // Clipboard API требует защищённого соединения, а панель работает по
+  // обычному HTTP: с самого сервера (localhost считается защищённым) он есть,
+  // с соседней машины — нет. Поэтому старый execCommand здесь не запасной
+  // путь, а основной для половины случаев.
+  window.actions.copy = function (el) {
+    var src = document.getElementById(el.dataset.target);
+    if (!src) return;
+    var text = src.value !== undefined ? src.value : src.textContent;
+
+    function ok() { toast('Скопировано', 'ok'); }
+    function legacy() {
+      try {
+        src.removeAttribute('readonly');
+        src.select();
+        src.setSelectionRange(0, text.length);
+        document.execCommand('copy');
+        src.setAttribute('readonly', '');
+        ok();
+      } catch (e) {
+        src.select();
+        toast('Скопируйте выделенное: Ctrl+C', '');
+      }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok, legacy);
+    } else {
+      legacy();
+    }
+  };
   // Показ/скрытие списка устройств по флажку «все ПК».
   window.actions.toggleList = function (el) {
     var box = document.getElementById(el.dataset.target);

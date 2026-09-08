@@ -113,3 +113,70 @@ func (a *App) agentBytes() ([]byte, bool) {
 	}
 	return data, true
 }
+
+// enrolledAgents — сколько машин уже с агентом и какая пришла последней.
+type enrolledAgents struct {
+	Count int         `json:"count"`
+	Last  *agentDebut `json:"last,omitempty"`
+}
+
+// agentDebut — машина, зарегистрировавшаяся последней.
+type agentDebut struct {
+	ID       int64  `json:"id"`
+	Hostname string `json:"hostname"`
+}
+
+// EnrolledAgents — GET /api/agents/enrolled (admin).
+//
+// Нужен странице настроек, чтобы сказать «подключился», не заставляя человека
+// уходить в список устройств и обновлять его. Установка агента на чужой машине
+// заканчивается тем, что там закрывается окно, — а состоялась она или нет,
+// видно только на сервере, и до сих пор это надо было идти проверять самому.
+func (a *App) EnrolledAgents(w http.ResponseWriter, r *http.Request) {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil || !user.IsAdmin() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var out enrolledAgents
+	_ = a.DB.QueryRow(
+		"SELECT COUNT(*) FROM devices WHERE COALESCE(agent_token,'')<>''").Scan(&out.Count)
+
+	var d agentDebut
+	err := a.DB.QueryRow(`SELECT id, hostname FROM devices
+		WHERE COALESCE(agent_token,'')<>'' ORDER BY id DESC LIMIT 1`).
+		Scan(&d.ID, &d.Hostname)
+	if err == nil {
+		out.Last = &d
+	}
+	writeJSON(w, out)
+}
+
+// localAgentInstalled — стоит ли агент на самой машине сервера.
+//
+// Сверяем по имени: устройство с агентом и тем же именем, что у сервера. Имя
+// может прийти полным (с доменной частью), поэтому сравнивается короткое и без
+// оглядки на регистр. Способ не идеальный, но честный: он опирается на то, что
+// сервер действительно видит, а не на отметку «кнопку нажимали».
+func (a *App) localAgentInstalled() bool {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return false
+	}
+	short := strings.ToLower(strings.SplitN(host, ".", 2)[0])
+	var n int
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM devices
+		WHERE COALESCE(agent_token,'')<>''
+		  AND LOWER(CASE WHEN INSTR(hostname,'.')>0
+		            THEN SUBSTR(hostname,1,INSTR(hostname,'.')-1) ELSE hostname END)=?`,
+		short).Scan(&n)
+	return n > 0
+}
+
+// agentsTotal — сколько устройств уже с агентом.
+func (a *App) agentsTotal() int {
+	var n int
+	_ = a.DB.QueryRow(
+		"SELECT COUNT(*) FROM devices WHERE COALESCE(agent_token,'')<>''").Scan(&n)
+	return n
+}
