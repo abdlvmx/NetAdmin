@@ -59,6 +59,7 @@ func (a *App) issueGroups() []issueGroup {
 		a.downServices(),
 		a.downSNMP(),
 		a.supplyAlerts(),
+		a.backupIssues(),
 	}
 	groups = append(groups, a.diskGroups()...)
 
