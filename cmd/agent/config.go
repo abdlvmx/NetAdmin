@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"netadmin/internal/agentcfg"
 )
 
 // agentConfig — постоянные настройки, которые записывает `agent -install`.
@@ -25,6 +27,7 @@ type agentConfig struct {
 // делом нужно знать, откуда агент его взял.
 const (
 	sourceConfig  = "agent_config.json"
+	sourceBaked   = "настройки внутри файла агента"
 	sourceEnv     = "переменные окружения"
 	sourceDefault = "значения по умолчанию"
 )
@@ -116,20 +119,29 @@ func loadSettings() {
 	c, err := readAgentConfig(exeDir())
 	settingsDenied = err != nil
 	envURL, envTok := os.Getenv("NETADMIN_SERVER_URL"), os.Getenv("NETADMIN_AGENT_TOKEN")
+	// Настройки, вшитые сервером в сам файл (см. internal/agentcfg). Стоят
+	// последними: это значения на момент скачивания, и всё, что задано на
+	// машине позже, важнее их.
+	baked, _ := agentcfg.ReadSelf()
 
 	switch {
 	case c.ServerURL != "":
 		rawServerURL, settingsSource = c.ServerURL, sourceConfig
 	case envURL != "":
 		rawServerURL, settingsSource = envURL, sourceEnv
+	case baked.ServerURL != "":
+		rawServerURL, settingsSource = baked.ServerURL, sourceBaked
 	default:
 		rawServerURL, settingsSource = "", sourceDefault
 	}
 	serverURL = normalizeServerURL(rawServerURL)
 
-	if c.EnrollToken != "" {
+	switch {
+	case c.EnrollToken != "":
 		token = c.EnrollToken
-	} else {
+	case envTok != "":
 		token = envTok
+	default:
+		token = baked.Token
 	}
 }

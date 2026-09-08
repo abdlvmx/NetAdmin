@@ -30,6 +30,10 @@ type App struct {
 	// установщика. nil — возможность недоступна (сервер собран без агента
 	// или запущен не в Windows).
 	InstallAgent func(serverURL, token string) (string, error)
+	// IsService — сервер запущен диспетчером служб, а не из консоли.
+	// Чек-лист первых шагов спрашивает об этом первым делом: запущенный
+	// из окна сервер закрывается вместе с ним.
+	IsService bool
 }
 
 // Routes собирает маршруты приложения (с security-обёрткой).
@@ -55,6 +59,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /logout", a.Logout)
 
 	mux.HandleFunc("GET /dashboard", a.Dashboard)
+	// чек-лист первых шагов: убрать с дашборда или вернуть
+	mux.HandleFunc("POST /dashboard/onboarding", a.HideOnboarding)
 
 	// Устройства
 	mux.HandleFunc("GET /devices", a.DevicesPage)
@@ -102,6 +108,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/organization", a.UpdateOrganization)
 	mux.HandleFunc("POST /settings/agent-token/rotate", a.RotateAgentToken)
 	mux.HandleFunc("GET /settings/agent-installer", a.AgentInstaller)
+	// готовый установщик: агент с уже вписанными адресом и ключом
+	mux.HandleFunc("GET /settings/agent-setup.exe", a.AgentSetupExe)
 	// Установка агента одной командой: скрипт и сборка отдаются без сессии —
 	// команда выполняется на машине, где сессии нет (см. enroll.go).
 	mux.HandleFunc("GET /enroll.ps1", a.EnrollScript)
@@ -122,6 +130,7 @@ func (a *App) Routes() http.Handler {
 	// Одноразовые коды регистрации агентов — см. enrollcodes.go
 	mux.HandleFunc("POST /settings/enroll-code", a.CreateEnrollCode)
 	mux.HandleFunc("POST /settings/enroll-code/{id}/revoke", a.RevokeEnrollCode)
+	mux.HandleFunc("GET /settings/enroll-code/{id}/installer", a.EnrollCodeInstaller)
 
 	// Мониторинг сервисов (HTTP/TCP/DNS/…)
 	mux.HandleFunc("GET /monitoring", a.ServiceMonitorPage)
@@ -196,6 +205,8 @@ func (a *App) Routes() http.Handler {
 	// JSON (инвентарь/мониторинг)
 	mux.HandleFunc("GET /api/metrics/fleet", a.FleetMetrics)
 	mux.HandleFunc("GET /api/devices/status", a.DevicesStatus)
+	// сколько машин уже с агентом: страница настроек ждёт первого подключения
+	mux.HandleFunc("GET /api/agents/enrolled", a.EnrolledAgents)
 	mux.HandleFunc("GET /api/devices/{id}/metrics", a.DeviceMetrics)
 	mux.HandleFunc("GET /api/devices/{id}/software", a.DeviceSoftware)
 	mux.HandleFunc("GET /api/devices/{id}/changes", a.DeviceChanges)

@@ -67,6 +67,15 @@ type settingsData struct {
 	CanInstallLocalAgent bool
 	// EnrollCodes — действующие одноразовые коды регистрации.
 	EnrollCodes []enrollCode
+	// LocalAgentInstalled — агент уже стоит на машине сервера: первый шаг
+	// установки пройден, и предлагать его снова незачем.
+	LocalAgentInstalled bool
+	// AgentsTotal — сколько машин уже с агентом. Страница ждёт прибавления,
+	// чтобы сказать «подключился» вместо «выполните и проверьте сами».
+	AgentsTotal int
+	// OnboardingHidden — чек-лист первых шагов убран с дашборда: тогда
+	// настройки предлагают вернуть его, иначе о нём негде вспомнить.
+	OnboardingHidden bool
 	// Version — версия сборки сервера. Показывается, чтобы на вопрос «какая у
 	// вас версия» можно было ответить, не открывая консоль.
 	Version string
@@ -137,6 +146,9 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		CanRestart:           a.Restart != nil,
 		CanInstallLocalAgent: a.InstallAgent != nil && agentbin.Available(),
 		EnrollCodes:          a.listEnrollCodes(agentServerURL(r)),
+		LocalAgentInstalled:  a.localAgentInstalled(),
+		AgentsTotal:          a.agentsTotal(),
+		OnboardingHidden:     cfg.OnboardingHidden,
 
 		Version: version.Full(),
 

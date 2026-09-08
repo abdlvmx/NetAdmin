@@ -75,6 +75,7 @@
     set('d-lg-on', online);   set('d-lg-on-pct', onPct+'%');
     set('d-lg-off', offline); set('d-lg-off-pct', dPct(offline,total)+'%');
     set('d-lg-unk', unknown); set('d-lg-unk-pct', dPct(unknown,total)+'%');
+    if(window.dashMarkUpdated) window.dashMarkUpdated(s.issues);
     const donut = document.getElementById('d-donut');
     if(donut && total){
       const on=online/total*100, off=on+offline/total*100;
@@ -82,4 +83,27 @@
     }
   }
   setInterval(refreshDashboard, 20000);
+
+  // ── отметка свежести ──
+  // Числа на странице подтягиваются фоном, а список «Требует внимания» — нет:
+  // он собирается на сервере. Раньше страница молча менялась под руками, и
+  // понять, свежее ли перед тобой, было неоткуда.
+  const stale = document.getElementById('issues-stale');
+  const baseIssues = stale ? (parseInt(stale.dataset.base, 10) || 0) : 0;
+  let lastOK = Date.now();
+
+  function markUpdated(issues){
+    lastOK = Date.now();
+    if(stale && issues !== undefined && issues !== baseIssues) stale.style.display = '';
+  }
+  function tickUpdated(){
+    const el = document.getElementById('dash-updated');
+    if(!el) return;
+    const sec = Math.round((Date.now() - lastOK)/1000);
+    el.textContent = sec < 60 ? 'обновлено ' + sec + ' с назад'
+      : 'обновлено ' + Math.round(sec/60) + ' мин назад';
+  }
+  setInterval(tickUpdated, 1000);
+  tickUpdated();
+  window.dashMarkUpdated = markUpdated;
 })();

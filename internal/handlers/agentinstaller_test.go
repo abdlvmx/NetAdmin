@@ -166,7 +166,10 @@ func TestAgentInstallerAcceptsOnlyLocalAddresses(t *testing.T) {
 	}
 }
 
-// Страница настроек показывает адреса для выбора.
+// Страница настроек показывает адреса для выбора и путь к установщику.
+//
+// Проверка идёт по адресам ссылок, а не по подписям кнопок: подписи меняются
+// вместе с текстом страницы, а сломанный маршрут — это неработающая установка.
 func TestSettingsShowsServerAddresses(t *testing.T) {
 	a := newTestApp(t)
 	rec := adminRequest(t, a, "GET", "http://192.168.1.64:8765/settings")
@@ -174,12 +177,29 @@ func TestSettingsShowsServerAddresses(t *testing.T) {
 		t.Fatalf("код %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Скачать установщик агента") {
-		t.Error("на странице нет кнопки скачивания установщика")
+	if !strings.Contains(body, "/settings/agent-installer") {
+		t.Error("на странице нет ссылки на установщик .bat")
 	}
 	for _, addr := range localIPv4s() {
 		if !strings.Contains(body, addr.IP) {
 			t.Errorf("адрес %s (%s) не предложен для выбора", addr.IP, addr.Iface)
 		}
+	}
+}
+
+// Со встроенной сборкой агента страница предлагает и готовый файл — самый
+// короткий путь установки, ради которого весь порядок шагов и переставлялся.
+func TestSettingsOffersReadyInstaller(t *testing.T) {
+	a := newTestApp(t)
+	withEmbeddedAgent(t, "MZ agent", "sha")
+	writeEnrollToken(t, "token")
+
+	rec := adminRequest(t, a, "GET", "http://192.168.1.64:8765/settings")
+	body := rec.Body.String()
+	if !strings.Contains(body, "/settings/agent-setup.exe") {
+		t.Error("нет ссылки на готовый агент с постоянным токеном")
+	}
+	if !strings.Contains(body, `data-act="copy"`) {
+		t.Error("команду установки нельзя скопировать одной кнопкой")
 	}
 }

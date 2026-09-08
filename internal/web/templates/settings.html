@@ -8,7 +8,37 @@
   .token-box { display: flex; gap: 10px; align-items: center; }
   .token-box input { font-family: ui-monospace, monospace; font-size: 12px; }
   .settings-grid { display: grid; gap: 16px; max-width: 640px; }
+
+  /* Установка агента как последовательность шагов: у новичка вопрос «с чего
+     начать», а не «какой из четырёх способов правильный». Альтернативы никуда
+     не делись — они убраны под «для опытных администраторов». */
+  .wiz-step { display: flex; gap: 12px; padding: 4px 0 16px; }
+  .wiz-step + .wiz-step { border-top: 1px solid var(--border); padding-top: 16px; }
+  .wiz-num { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: var(--fs-xs); font-weight: 700; font-variant-numeric: tabular-nums;
+    background: var(--accent); color: #fff; }
+  .wiz-num.is-done { background: var(--green-soft); color: var(--green); border: 1px solid var(--green); }
+  .wiz-num .ico { width: 13px; height: 13px; stroke-width: 2.5; }
+  .wiz-body { flex: 1; min-width: 0; }
+  .wiz-title { font-size: var(--fs-md); font-weight: 700; margin-bottom: 6px; }
+
+  /* Ожидание первого подключения. Установка заканчивается на чужой машине,
+     и до сих пор о её исходе приходилось догадываться. */
+  .agent-wait { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px;
+    padding: 10px 12px; border-radius: var(--radius-sm); font-size: var(--fs-sm);
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); }
+  .agent-wait.done { background: var(--green-soft); border-color: var(--green); color: var(--green); }
+  .agent-wait.done .agent-wait-dot { background: var(--green); animation: none; }
+  .agent-wait-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px;
+    background: var(--muted); animation: waitPulse 1.6s ease-in-out infinite; }
+  @keyframes waitPulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .agent-wait-dot { animation: none; } }
 </style>
+{{end}}
+
+{{define "scripts"}}
+<script src="/static/settings.js" defer></script>
 {{end}}
 
 {{define "content"}}
@@ -36,6 +66,7 @@
     {{else if eq .Message "agent_installed"}}Агент установлен на этот компьютер. Устройство появится в списке в течение минуты.
     {{else if eq .Message "code_created"}}Код создан. Скопируйте команду и выполните её на нужном компьютере.
     {{else if eq .Message "code_revoked"}}Код отозван. Уже установленные агенты продолжат работать.
+    {{else if eq .Message "onboarding_shown"}}Чек-лист первых шагов снова на дашборде.
     {{else}}Сохранено.{{end}}
   </div>
   {{end}}
@@ -71,24 +102,61 @@
       </div>
       {{end}}
 
-      {{if .CanInstallLocalAgent}}
-      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
-        Начните с машины, на которой работает сервер, — агент уже внутри,
-        скачивать и копировать ничего не нужно.</p>
-      <form method="post" action="/settings/agent-install-local"
-            data-confirm="Установить агент NetAdmin на этот компьютер?">
-        <button class="btn">Установить агент на этот компьютер</button>
-      </form>
-      <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+      <div class="wiz-step">
+        <div class="wiz-num{{if .LocalAgentInstalled}} is-done{{end}}">
+          {{if .LocalAgentInstalled}}<svg class="ico"><use href="#i-check"/></svg>{{else}}1{{end}}
+        </div>
+        <div class="wiz-body">
+          <div class="wiz-title">Этот компьютер</div>
+          {{if .LocalAgentInstalled}}
+          <p class="text-muted" style="font-size:12px">
+            Агент установлен — сервер числит свою машину обычным устройством.</p>
+          {{else if .CanInstallLocalAgent}}
+          <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+            Начните отсюда: агент уже внутри сервера, скачивать и копировать
+            ничего не нужно.</p>
+          <form method="post" action="/settings/agent-install-local"
+                data-confirm="Установить агент NetAdmin на этот компьютер?">
+            <button class="btn btn-primary">Установить агент на этот компьютер</button>
+          </form>
+          {{else}}
+          <p class="text-muted" style="font-size:12px">
+            Установка одной кнопкой доступна, когда сервер работает службой
+            Windows и собран со встроенным агентом.</p>
+          {{end}}
+        </div>
+      </div>
+
+      <div class="wiz-step">
+        <div class="wiz-num{{if gt .AgentsTotal 1}} is-done{{end}}">
+          {{if gt .AgentsTotal 1}}<svg class="ico"><use href="#i-check"/></svg>{{else}}2{{end}}
+        </div>
+        <div class="wiz-body">
+          <div class="wiz-title">Остальные компьютеры</div>
+          {{if .AgentUpload}}
+          <p class="text-muted" style="font-size:12px;margin-bottom:10px">
+            Создайте одноразовый код — и дальше на выбор: скачать готовый файл и
+            запустить его на машине двойным щелчком либо выполнить строку в
+            PowerShell от имени администратора. Агент поставится службой и
+            зарегистрируется сам.</p>
+          {{end}}
+
+      {{if .ServerAddrs}}
+      <div class="form-group" style="max-width:420px">
+        <label>Адрес, по которому агенты видят сервер</label>
+        <select data-act-change="pickHost">
+          {{range .ServerAddrs}}
+          <option value="{{.IP}}" {{if eq .IP $.PickedAddr}}selected{{end}}>{{.IP}} — {{.Iface}}</option>
+          {{end}}
+        </select>
+        <p class="text-muted" style="font-size:12px;margin-top:6px">
+          Если адресов несколько, возьмите тот, что в одной подсети с компьютерами
+          сотрудников: у VPN и виртуальных адаптеров адрес свой, и по нему агенты
+          сервер не найдут. Выбранный адрес попадёт и в команду, и в готовый файл.</p>
+      </div>
       {{end}}
 
       {{if .AgentUpload}}
-      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
-        <b>На остальных компьютерах:</b> создайте одноразовый код и выполните
-        полученную строку в <b>PowerShell от имени администратора</b> на нужной
-        машине. Агент скачается с этого сервера, установится службой и
-        зарегистрируется сам.</p>
-
       <form method="post" action="/settings/enroll-code" class="row" style="gap:10px;align-items:flex-end">
         <div class="form-group" style="margin-bottom:0">
           <label>Действует</label>
@@ -117,8 +185,18 @@
             Осталось {{if lt .Left 0}}без ограничения{{else}}{{.Left}}{{end}}
             установок · истекает через {{.ExpiresIn}}
           </div>
+          {{if $.AgentUpload}}
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <a class="btn btn-primary" href="/settings/enroll-code/{{.ID}}/installer?host={{$.PickedAddr}}">Скачать готовый файл</a>
+            <span class="text-muted" style="font-size:12px">
+              Агент с этим кодом внутри: положить на общую папку, запустить на
+              машине двойным щелчком — ни консоли, ни набора команды.</span>
+          </div>
+          {{end}}
+          <div class="text-muted" style="font-size:12px;margin-bottom:5px">Или строкой в PowerShell:</div>
           <div class="token-box">
-            <input value="{{.Command}}" readonly data-act="selectAll">
+            <input id="cmd-{{.ID}}" value="{{.Command}}" readonly data-act="selectAll">
+            <button class="btn" data-act="copy" data-target="cmd-{{.ID}}">Копировать</button>
             <form method="post" action="/settings/enroll-code/{{.ID}}/revoke"
                   data-confirm="Отозвать код? Уже поставленные агенты продолжат работать.">
               <button class="btn btn-ghost">Отозвать</button>
@@ -133,6 +211,24 @@
         число установок, — потерянная строка не остаётся рабочей навсегда.</p>
       {{end}}
 
+      {{if .EnrollCodes}}
+      <div class="agent-wait waiting" id="agent-wait" data-base="{{.AgentsTotal}}">
+        <span class="agent-wait-dot"></span>
+        <span data-wait-text>Ожидаем подключение… Установите агента на любой машине —
+          страница сама скажет, когда он выйдет на связь.</span>
+      </div>
+      {{end}}
+      {{else}}
+      <p class="text-muted" style="font-size:12px">
+        Этот сервер собран без встроенного агента. Чтобы ставить агента одной
+        командой, загрузите файл <b>agent.exe</b> в разделе
+        <a href="/packages">Установка ПО</a> — тот же файл используется для
+        обновления агентов на всём парке.</p>
+      {{end}}
+        </div>
+      </div>
+
+      {{if .AgentUpload}}
       <details style="margin-top:14px">
         <summary class="text-muted" style="font-size:12px;cursor:pointer">Постоянный токен — для скриптов раскатки</summary>
         <p class="text-muted" style="font-size:12px;margin:10px 0">
@@ -140,45 +236,34 @@
           с ограниченным сроком неудобен: массовая раскатка через GPO или
           собственный скрипт, установка через <code>install_agent.bat</code>.</p>
         <div class="token-box">
-          <input value="{{.EnrollCmd}}" readonly data-act="selectAll">
+          <input id="cmd-permanent" value="{{.EnrollCmd}}" readonly data-act="selectAll">
+          <button class="btn" data-act="copy" data-target="cmd-permanent">Копировать</button>
         </div>
       </details>
-      {{else}}
-      <p class="text-muted" style="font-size:12px;margin-bottom:10px">
-        Этот сервер собран без встроенного агента. Чтобы ставить агента одной
-        командой, загрузите файл <b>agent.exe</b> в разделе
-        <a href="/packages">Установка ПО</a> — тот же файл используется для
-        обновления агентов на всём парке.</p>
       {{end}}
 
       <details style="margin-top:14px">
-        <summary class="text-muted" style="font-size:12px;cursor:pointer">Установка файлом, без команды</summary>
+        <summary class="text-muted" style="font-size:12px;cursor:pointer">Другие способы — для опытных администраторов</summary>
+
+        {{if .AgentUpload}}
         <p class="text-muted" style="font-size:12px;margin:10px 0">
-          Если PowerShell на устройствах закрыт политикой: скачайте установщик —
-          адрес сервера и токен уже вписаны. На компьютере положите рядом
-          <b>agent.exe</b> и запустите файл от имени администратора.
+          <b>Готовый агент с постоянным токеном.</b> Тот же файл, что и по кнопке
+          рядом с кодом, но ключ в нём не истекает: такой можно оставить на общей
+          папке надолго. Отзывается сменой токена в разделе «Токен агента» ниже.</p>
+        <a class="btn" href="/settings/agent-setup.exe?host={{.PickedAddr}}">Скачать агента с настройками</a>
+        <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+        {{end}}
+
+        <p class="text-muted" style="font-size:12px;margin:10px 0">
+          <b>Старый способ, через .bat.</b> Скачайте установщик — адрес сервера и
+          токен уже вписаны. На компьютере положите рядом <b>agent.exe</b> и
+          запустите файл от имени администратора.
           {{if .AgentUpload}}Сам <b>agent.exe</b> — по ссылке
           <a href="/agent.exe">/agent.exe</a> с этого сервера.{{end}}</p>
-        {{if .ServerAddrs}}
-        <form method="get" action="/settings/agent-installer">
-          <div class="form-group">
-            <label>Адрес, по которому агенты видят сервер</label>
-            <select name="host">
-              {{range .ServerAddrs}}
-              <option value="{{.IP}}" {{if eq .IP $.PickedAddr}}selected{{end}}>{{.IP}} — {{.Iface}}</option>
-              {{end}}
-            </select>
-          </div>
-          <button class="btn">Скачать установщик агента</button>
-        </form>
+        <a class="btn" href="/settings/agent-installer?host={{.PickedAddr}}">Скачать install_agent.bat</a>
         <p class="text-muted" style="font-size:12px;margin-top:10px">
-          Если адресов несколько, выберите тот, что в одной подсети с компьютерами
-          сотрудников: у VPN и виртуальных адаптеров адрес свой, и по нему агенты
-          сервер не найдут.
-        </p>
-        {{else}}
-        <a class="btn" href="/settings/agent-installer" download>Скачать установщик агента</a>
-        {{end}}
+          Адрес берётся тот же, что выбран выше, — и в команде, и в готовом файле,
+          и здесь он один.</p>
       </details>
     </div>
 
@@ -365,6 +450,19 @@
         <button class="btn btn-ghost">Отправить тест</button>
       </form>
     </div>
+
+    {{if .OnboardingHidden}}
+    <div class="card">
+      <div class="card-header"><span class="card-title">Первые шаги</span></div>
+      <p class="text-muted" style="font-size:13px">Чек-лист первых шагов убран с дашборда.
+        Он показывает, что уже сделано и что осталось: служба, агенты, обнаружение,
+        копии и уведомления.</p>
+      <form method="post" action="/dashboard/onboarding" style="margin-top:10px">
+        <input type="hidden" name="hidden" value="0">
+        <button class="btn btn-ghost">Вернуть на дашборд</button>
+      </form>
+    </div>
+    {{end}}
 
     <div class="card">
       <div class="card-header"><span class="card-title">Пароль</span></div>
