@@ -9,9 +9,10 @@ import (
 	"netadmin/internal/web"
 )
 
-// За версией в интерфейс приходят тогда, когда что-то пошло не так и надо
-// ответить, какая это сборка. Строка должна там остаться.
-func TestSettingsPageShowsVersion(t *testing.T) {
+// Две вещи, за которыми в интерфейс приходят, когда что-то пошло не так:
+// какая это сборка и что делать с потерянным паролем. Обе — на странице
+// настроек, и обе должны там остаться.
+func TestSettingsPageShowsVersionAndRecovery(t *testing.T) {
 	rec := httptest.NewRecorder()
 	web.RenderPage(rec, "settings", settingsData{
 		User:    &auth.User{ID: 1, Username: "admin", Role: "admin"},
@@ -24,5 +25,8 @@ func TestSettingsPageShowsVersion(t *testing.T) {
 	}
 	if !strings.Contains(body, "9.9.9 · deadbee") {
 		t.Error("версия сборки на странице настроек не показана")
+	}
+	if !strings.Contains(body, "-reset-password") {
+		t.Error("нет подсказки, как восстановить доступ при потерянном пароле")
 	}
 }

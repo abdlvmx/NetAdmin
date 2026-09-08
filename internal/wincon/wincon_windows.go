@@ -51,6 +51,40 @@ func AskLine(prompt string) (string, bool) {
 	return strings.TrimSpace(line), true
 }
 
+// AskSecret спрашивает строку, не показывая набранное, — для паролей.
+//
+// Пароль, оставшийся в окне консоли, читает любой, кто подойдёт к машине
+// следом, и он же уезжает в снимок экрана, приложенный к сообщению об ошибке.
+// Ответ не подрезается по краям: пробел в начале или в конце — такой же символ
+// пароля, как остальные, и убрать его здесь означало бы задать не тот пароль,
+// который потом придётся ввести в форму входа.
+func AskSecret(prompt string) (string, bool) {
+	fmt.Print(prompt)
+	restore := hideInput()
+	line, ok := readLine()
+	restore()
+	fmt.Println() // нажатый Enter не отразился на экране — переводим строку сами
+	return line, ok
+}
+
+// hideInput выключает отражение ввода и возвращает восстановление прежнего
+// режима. Если ввод не консоль (перенаправлен из файла или канала), выключать
+// нечего — тогда обе функции ничего не делают.
+func hideInput() func() {
+	h, err := windows.GetStdHandle(windows.STD_INPUT_HANDLE)
+	if err != nil {
+		return func() {}
+	}
+	var mode uint32
+	if err := windows.GetConsoleMode(h, &mode); err != nil {
+		return func() {}
+	}
+	if err := windows.SetConsoleMode(h, mode&^windows.ENABLE_ECHO_INPUT); err != nil {
+		return func() {}
+	}
+	return func() { _ = windows.SetConsoleMode(h, mode) }
+}
+
 // AskYesNo задаёт вопрос с ответом по умолчанию «да».
 func AskYesNo(question string) bool {
 	ans, ok := AskLine(question + " [Y/n] ")
