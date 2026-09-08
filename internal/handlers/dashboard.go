@@ -34,14 +34,6 @@ type deviceLoad struct {
 	Class               string
 }
 
-// dashIssue — строка сводки «Требует внимания»: сколько проблем и куда идти.
-type dashIssue struct {
-	Label string
-	Count int
-	Href  string
-	Crit  bool
-}
-
 type dashData struct {
 	User   *auth.User
 	Active string
@@ -50,7 +42,8 @@ type dashData struct {
 	Stats         dashStats
 	Donut         donutData
 	TopDevices    []deviceLoad
-	Issues        []dashIssue
+	Issues        []issueGroup
+	IssuesTotal   int
 	Activity      []auditRow
 	LastHeartbeat string
 }
@@ -76,6 +69,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 		   OR (last_seen IS NOT NULL AND last_seen < datetime('now','-10 minutes'))`)
 	s.DevicesOnlinePct = pct(s.DevicesOnline, s.DevicesTotal)
 
+	issues := a.issueGroups()
 	data := dashData{
 		User:          user,
 		Active:        "dashboard",
@@ -83,7 +77,8 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 		Stats:         s,
 		Donut:         buildDonut(s.DevicesOnline, s.DevicesOffline, s.DevicesTotal),
 		TopDevices:    a.topDevices(),
-		Issues:        a.issues(s.AlertsTotal),
+		Issues:        issues,
+		IssuesTotal:   issuesTotal(issues),
 		Activity:      a.recentActivity(),
 		LastHeartbeat: a.lastHeartbeat(),
 	}
@@ -111,73 +106,6 @@ func buildDonut(online, offline, total int) donutData {
 		"conic-gradient(#18a058 0 %.1f%%, #e5484d %.1f%% %.1f%%, #cdd6e4 %.1f%% 100%%)",
 		onPct, onPct, offPct, offPct))
 	return d
-}
-
-// issues собирает сводку «Требует внимания» по всем источникам. Раньше дашборд
-// считал только устройства: упавший сервис, диск с предупреждением SMART или
-// заканчивающийся тонер видел лишь тот, кто зайдёт в соответствующий раздел.
-//
-// deviceAlerts уже посчитан для карточки «Предупреждения» — второй раз базу
-// об этом не спрашиваем.
-func (a *App) issues(deviceAlerts int) []dashIssue {
-	out := []dashIssue{}
-	add := func(label, href string, n int, crit bool) {
-		if n > 0 {
-			out = append(out, dashIssue{Label: label, Count: n, Href: href, Crit: crit})
-		}
-	}
-	count := func(query string) int {
-		var n int
-		if err := a.DB.QueryRow(query).Scan(&n); err != nil {
-			log.Printf("issues: %v", err)
-		}
-		return n
-	}
-
-	add("Устройства: офлайн или перегрузка", "/devices?alerts=1", deviceAlerts, true)
-	add("Сервисы не отвечают", "/monitoring",
-		count(`SELECT COUNT(*) FROM service_checks WHERE enabled=1 AND last_status='down'`), true)
-	add("SNMP-устройства недоступны", "/snmp",
-		count(`SELECT COUNT(*) FROM snmp_devices WHERE enabled=1 AND last_status='down'`), true)
-	add("Расходники и батареи на исходе", "/snmp",
-		count(`SELECT COUNT(*) FROM snmp_devices WHERE enabled=1 AND COALESCE(supply_alert,0)=1`), false)
-
-	diskCrit, diskWarn := a.diskIssues()
-	add("Диски: ожидается отказ", "/disk-health", diskCrit, true)
-	add("Диски с предупреждением SMART", "/disk-health", diskWarn, false)
-	return out
-}
-
-// diskIssues считает диски с замечаниями. Отбор в SQL заведомо шире любого
-// вердикта, а решение принимает та же assessDisk, что и страница дисков, —
-// иначе две оценки одного диска со временем разъехались бы.
-func (a *App) diskIssues() (crit, warn int) {
-	rows, err := a.DB.Query(`SELECT COALESCE(health,''), temperature, wear_pct, read_errors, predict_fail
-		FROM disks
-		WHERE predict_fail=1 OR wear_pct>=80 OR temperature>=60 OR read_errors>0
-		   OR LOWER(COALESCE(health,'')) IN ('unhealthy','warning')`)
-	if err != nil {
-		return 0, 0
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var d diskInfo
-		var pf int
-		if rows.Scan(&d.Health, &d.Temperature, &d.WearPct, &d.ReadErrors, &pf) != nil {
-			continue
-		}
-		d.PredictFail = pf == 1
-		switch assessDisk(d).Severity {
-		case "critical":
-			crit++
-		case "warning":
-			warn++
-		}
-	}
-	if err := rows.Err(); err != nil {
-		log.Printf("diskIssues: %v", err)
-	}
-	return crit, warn
 }
 
 func (a *App) topDevices() []deviceLoad {

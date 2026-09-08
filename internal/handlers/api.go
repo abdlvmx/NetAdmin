@@ -154,10 +154,15 @@ func (a *App) DevicesStatus(w http.ResponseWriter, r *http.Request) {
 	a.DB.QueryRow(`SELECT COUNT(*) FROM devices
 		WHERE status='offline' OR cpu_usage>=90 OR ram_usage>=90 OR disk_usage>=90
 		   OR (last_seen IS NOT NULL AND last_seen < datetime('now','-10 minutes'))`).Scan(&alerts)
+	// Число проблем в сводке — чтобы дашборд заметил, что список «Требует
+	// внимания» устарел, и предложил обновить страницу. Перерисовать его сам он
+	// не может: список собирается на сервере, а перезагружать страницу под
+	// курсором у человека — последнее, чего от неё ждут.
+	issues := issuesTotal(a.issueGroups())
 	writeJSON(w, map[string]any{
 		"devices": list,
 		"summary": map[string]int{"total": total, "online": online, "offline": offline,
-			"unknown": total - online - offline, "alerts": alerts},
+			"unknown": total - online - offline, "alerts": alerts, "issues": issues},
 	})
 }
 
