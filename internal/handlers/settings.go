@@ -14,6 +14,7 @@ import (
 	"netadmin/internal/config"
 	"netadmin/internal/netiface"
 	"netadmin/internal/notify"
+	"netadmin/internal/tz"
 	"netadmin/internal/version"
 	"netadmin/internal/web"
 )
@@ -76,6 +77,11 @@ type settingsData struct {
 	// OnboardingHidden — чек-лист первых шагов убран с дашборда: тогда
 	// настройки предлагают вернуть его, иначе о нём негде вспомнить.
 	OnboardingHidden bool
+	// Timezone — выбранный пояс (пусто — зона сервера), TimezoneLabel — как
+	// он выглядит сейчас, Zones — из чего выбирать.
+	Timezone      string
+	TimezoneLabel string
+	Zones         []zoneChoice
 	// BackupProblem — что не так с копиями прямо сейчас; пусто — всё в порядке.
 	BackupProblem string
 	// BackupSameVolume — каталог копий на том же диске, что и база: от отказа
@@ -157,6 +163,10 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		AgentsTotal:          a.agentsTotal(),
 		OnboardingHidden:     cfg.OnboardingHidden,
 
+		Timezone:      cfg.Timezone,
+		TimezoneLabel: tz.Label(),
+		Zones:         zoneChoices(),
+
 		BackupProblem:    backupProblemText(bs),
 		BackupSameVolume: bs.SameVolume(config.DBPath()),
 
@@ -230,6 +240,17 @@ func (a *App) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 		name = config.DefaultOrgName
 	}
 	cfg.OrganizationName = name
+
+	// Пояс применяется сразу, а не после перезапуска: он влияет только на
+	// показ, и заставлять перезапускать сервер ради подписи под графиком
+	// значило бы наказывать за исправление опечатки.
+	zone := strings.TrimSpace(r.FormValue("timezone"))
+	if err := tz.Set(zone); err != nil {
+		settingsError(w, r, "Часовой пояс не принят: "+err.Error())
+		return
+	}
+	cfg.Timezone = zone
+
 	_ = config.Save(cfg)
 	auth.LogAction(a.DB, user.ID, "update_settings", "organization_name", name)
 	http.Redirect(w, r, "/settings?message=organization_saved", http.StatusSeeOther)
@@ -448,4 +469,24 @@ func hostOnly(u string) string {
 		return h
 	}
 	return s
+}
+
+// zoneChoice — пояс в том виде, в каком его показывает список настроек.
+type zoneChoice struct {
+	Name   string // имя IANA, пусто — зона сервера
+	Title  string // город
+	Offset string // «UTC+5» на сегодня
+}
+
+// zoneChoices — из чего выбирать часовой пояс.
+//
+// Первым пунктом — зона самого сервера: он обычно стоит там же, где и люди,
+// и в большинстве установок трогать здесь нечего. Смещения считаются, а не
+// вписаны: они меняются законом.
+func zoneChoices() []zoneChoice {
+	out := []zoneChoice{{Title: "Как на этом сервере", Offset: tz.Offset()}}
+	for _, z := range tz.Zones {
+		out = append(out, zoneChoice{Name: z.Name, Title: z.Title, Offset: tz.ZoneOffset(z.Name)})
+	}
+	return out
 }

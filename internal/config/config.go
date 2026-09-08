@@ -63,6 +63,10 @@ type Config struct {
 	BackupKeep          int    `json:"backup_keep"`
 	BackupDir           string `json:"backup_dir"`       // пусто = <каталог данных>/backups
 	HelpdeskEnabled     bool   `json:"helpdesk_enabled"` // приём заявок сотрудников через портал /help
+	// Timezone — часовой пояс для показа времени, имя IANA
+	// («Asia/Yekaterinburg»). Пусто — зона самой машины сервера. В базе
+	// время всегда UTC, пояс применяется только на вывод.
+	Timezone string `json:"timezone"`
 	// Сетевые настройки. Пустое значение означает «не задано»: тогда берётся
 	// одноимённая переменная окружения, а если нет и её — умолчание.
 	//
