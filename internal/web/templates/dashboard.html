@@ -102,6 +102,14 @@
       <div class="stat-value {{if .Stats.AlertsTotal}}text-red{{end}}" id="d-alerts">{{.Stats.AlertsTotal}}</div>
       <div class="stat-sub">offline, ресурс или heartbeat</div>
     </a>
+    <a href="/devices?agent=no" class="stat-card" title="Показать устройства без агента">
+      <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-server"/></svg></div><div class="stat-label">Покрытие агентами</div>
+        {{if .Stats.DevicesTotal}}<span class="stat-badge {{if eq .Stats.DevicesNoAgent 0}}green{{end}}">{{.Stats.AgentCoveragePct}}%</span>{{end}}</div>
+      <div class="stat-value">{{.Stats.DevicesWithAgent}} <span class="stat-of">/ {{.Stats.DevicesTotal}}</span></div>
+      <div class="stat-sub">
+        {{if .Stats.DevicesNoAgent}}{{.Stats.DevicesNoAgent}} без агента{{else}}агент на всех устройствах{{end}}
+        {{if .Stats.DiscoveredNew}} · ещё {{.Stats.DiscoveredNew}} найдено в сети{{end}}</div>
+    </a>
     <div class="stat-card">
       <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-people"/></svg></div><div class="stat-label">Пользователи</div></div>
       <div class="stat-value">{{.Stats.UsersTotal}}</div>

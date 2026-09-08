@@ -72,6 +72,11 @@
       const sel = document.querySelector('select[data-col="status"]');
       if(sel){ sel.value = status; sel.dispatchEvent(new Event('change')); }
     }
+    const agent = p.get('agent');
+    if(agent){
+      const sel = document.querySelector('select[data-col="agent"]');
+      if(sel){ sel.value = agent; sel.dispatchEvent(new Event('change')); }
+    }
     if(p.get('alerts')==='1'){
       document.querySelectorAll('#dev-body tr').forEach(tr=>{
         if(tr.querySelector('td')) tr.style.display = (tr.dataset.alert==='1') ? '' : 'none';
