@@ -220,8 +220,20 @@ func shortcutPath() string {
 }
 
 func writeShortcut() error {
-	body := "[InternetShortcut]\r\nURL=http://127.0.0.1:8765/\r\n"
-	return os.WriteFile(shortcutPath(), []byte(body), 0o644)
+	return os.WriteFile(shortcutPath(), []byte(shortcutBody(serviceExePath())), 0o644)
+}
+
+// shortcutBody — содержимое ярлыка.
+//
+// Значок задан явно: без IconFile Windows рисует .url значком браузера по
+// умолчанию, и NetAdmin лежит на рабочем столе неотличимо от случайной
+// закладки. Берём его из установленного .exe — значок там уже есть
+// (см. cmd/icongen), класть рядом отдельный .ico не нужно.
+func shortcutBody(exe string) string {
+	return "[InternetShortcut]\r\n" +
+		"URL=http://127.0.0.1:8765/\r\n" +
+		"IconFile=" + exe + "\r\n" +
+		"IconIndex=0\r\n"
 }
 
 func samePath(a, b string) bool {
