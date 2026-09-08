@@ -66,6 +66,9 @@ type settingsData struct {
 	CanInstallLocalAgent bool
 	// EnrollCodes — действующие одноразовые коды регистрации.
 	EnrollCodes []enrollCode
+	// OnboardingHidden — чек-лист первых шагов убран с дашборда: тогда
+	// настройки предлагают вернуть его, иначе о нём негде вспомнить.
+	OnboardingHidden bool
 	Message     string
 	Error       string
 }
@@ -133,6 +136,7 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		CanRestart:           a.Restart != nil,
 		CanInstallLocalAgent: a.InstallAgent != nil && agentbin.Available(),
 		EnrollCodes:          a.listEnrollCodes(agentServerURL(r)),
+		OnboardingHidden:     cfg.OnboardingHidden,
 
 		Message: r.URL.Query().Get("message"),
 		Error:   r.URL.Query().Get("error"),

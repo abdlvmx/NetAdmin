@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"netadmin/internal/auth"
+	"netadmin/internal/config"
 	"netadmin/internal/tz"
 	"netadmin/internal/web"
 )
@@ -42,8 +43,10 @@ type dashIssue struct {
 }
 
 type dashData struct {
-	User          *auth.User
-	Active        string
+	User   *auth.User
+	Active string
+	// Onboarding — чек-лист первых шагов; nil, когда показывать нечего.
+	Onboarding    *onboarding
 	Stats         dashStats
 	Donut         donutData
 	TopDevices    []deviceLoad
@@ -76,6 +79,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 	data := dashData{
 		User:          user,
 		Active:        "dashboard",
+		Onboarding:    a.onboardingFor(user, config.Load()),
 		Stats:         s,
 		Donut:         buildDonut(s.DevicesOnline, s.DevicesOffline, s.DevicesTotal),
 		TopDevices:    a.topDevices(),

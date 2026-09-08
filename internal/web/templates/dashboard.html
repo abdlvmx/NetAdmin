@@ -73,6 +73,34 @@
   .act-time { color: var(--muted); font-size: 12px; }
   .act-cat { color: var(--muted); font-size: 12px; }
 
+  /* ===== Чек-лист первых шагов =====
+     Пройденные шаги сворачиваются в строку, текущий раскрыт: список из пяти
+     одинаково подробных пунктов читается как инструкция к прибору, а нужен
+     ответ на один вопрос — что делать сейчас. */
+  .onb { margin-bottom: 16px; }
+  .onb-count { font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; }
+  .onb-bar { height: 4px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-bottom: 4px; }
+  .onb-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s ease; }
+  .onb-list { list-style: none; }
+  .onb-step { display: flex; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+  .onb-step:last-child { border-bottom: none; padding-bottom: 0; }
+  .onb-mark { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: var(--fs-xs); font-weight: 700; font-variant-numeric: tabular-nums;
+    border: 1px solid var(--border-2); color: var(--muted); background: var(--surface); }
+  .onb-step.is-done .onb-mark { background: var(--green-soft); border-color: var(--green); color: var(--green); }
+  .onb-step.is-now .onb-mark { background: var(--accent); border-color: transparent; color: #fff; }
+  .onb-mark .ico { width: 13px; height: 13px; stroke-width: 2.5; }
+  .onb-body { flex: 1; min-width: 0; }
+  .onb-title { font-size: var(--fs-md); font-weight: 500; color: var(--muted); }
+  .onb-step.is-now .onb-title { font-weight: 700; color: var(--text); }
+  .onb-step.is-done .onb-title { color: var(--text-2); }
+  .onb-detail { font-size: var(--fs-sm); color: var(--muted); margin-top: 5px; max-width: 72ch; }
+  .onb-do { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .onb-cmd { font-family: ui-monospace, monospace; font-size: 12px; width: 100%; max-width: 340px;
+    background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--radius-sm);
+    padding: 7px 10px; color: var(--text); }
+
   .pills { display: flex; gap: 6px; }
   .pills button { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
     font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 20px; cursor: pointer; }
@@ -90,6 +118,43 @@
 </div>
 
 <div class="content">
+  {{with .Onboarding}}
+  <div class="card onb">
+    <div class="card-header">
+      <span class="card-title">Начать работу</span>
+      <span class="onb-count">{{.Done}} из {{.Total}}</span>
+      <form method="post" action="/dashboard/onboarding">
+        <input type="hidden" name="hidden" value="1">
+        <button class="btn btn-ghost" title="Убрать карточку. Вернуть — в настройках">Скрыть</button>
+      </form>
+    </div>
+    <div class="onb-bar"><div class="onb-bar-fill" style="width:{{.Pct}}%"></div></div>
+    <ol class="onb-list">
+      {{range .Steps}}
+      <li class="onb-step{{if .Done}} is-done{{end}}{{if .Now}} is-now{{end}}">
+        <span class="onb-mark">{{if .Done}}<svg class="ico"><use href="#i-check"/></svg>{{else}}{{.Num}}{{end}}</span>
+        <div class="onb-body">
+          <div class="onb-title">{{.Title}}</div>
+          {{if .Now}}
+          <p class="onb-detail">{{.Detail}}</p>
+          <div class="onb-do">
+            {{if .Cmd}}<input class="onb-cmd" value="{{.Cmd}}" readonly data-act="selectAll">{{end}}
+            {{if .Post}}
+            <form method="post" action="{{.Post}}" data-confirm="{{.Ask}}">
+              <button class="btn btn-primary">{{.Action}}</button>
+            </form>
+            {{else if .Href}}
+            <a class="btn btn-primary" href="{{.Href}}">{{.Action}}</a>
+            {{end}}
+          </div>
+          {{end}}
+        </div>
+      </li>
+      {{end}}
+    </ol>
+  </div>
+  {{end}}
+
   <div class="stats-grid">
     <a href="/devices?status=online" class="stat-card" title="Показать устройства онлайн">
       <div class="stat-top"><div class="stat-ic"><svg class="ico"><use href="#i-devices"/></svg></div><div class="stat-label">Устройства онлайн</div>

@@ -36,6 +36,7 @@
     {{else if eq .Message "agent_installed"}}Агент установлен на этот компьютер. Устройство появится в списке в течение минуты.
     {{else if eq .Message "code_created"}}Код создан. Скопируйте команду и выполните её на нужном компьютере.
     {{else if eq .Message "code_revoked"}}Код отозван. Уже установленные агенты продолжат работать.
+    {{else if eq .Message "onboarding_shown"}}Чек-лист первых шагов снова на дашборде.
     {{else}}Сохранено.{{end}}
   </div>
   {{end}}
@@ -365,6 +366,19 @@
         <button class="btn btn-ghost">Отправить тест</button>
       </form>
     </div>
+
+    {{if .OnboardingHidden}}
+    <div class="card">
+      <div class="card-header"><span class="card-title">Первые шаги</span></div>
+      <p class="text-muted" style="font-size:13px">Чек-лист первых шагов убран с дашборда.
+        Он показывает, что уже сделано и что осталось: служба, агенты, обнаружение,
+        копии и уведомления.</p>
+      <form method="post" action="/dashboard/onboarding" style="margin-top:10px">
+        <input type="hidden" name="hidden" value="0">
+        <button class="btn btn-ghost">Вернуть на дашборд</button>
+      </form>
+    </div>
+    {{end}}
 
     <div class="card">
       <div class="card-header"><span class="card-title">Пароль</span></div>

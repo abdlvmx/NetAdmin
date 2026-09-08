@@ -30,6 +30,10 @@ type App struct {
 	// установщика. nil — возможность недоступна (сервер собран без агента
 	// или запущен не в Windows).
 	InstallAgent func(serverURL, token string) (string, error)
+	// IsService — сервер запущен диспетчером служб, а не из консоли.
+	// Чек-лист первых шагов спрашивает об этом первым делом: запущенный
+	// из окна сервер закрывается вместе с ним.
+	IsService bool
 }
 
 // Routes собирает маршруты приложения (с security-обёрткой).
@@ -52,6 +56,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /logout", a.Logout)
 
 	mux.HandleFunc("GET /dashboard", a.Dashboard)
+	// чек-лист первых шагов: убрать с дашборда или вернуть
+	mux.HandleFunc("POST /dashboard/onboarding", a.HideOnboarding)
 
 	// Устройства
 	mux.HandleFunc("GET /devices", a.DevicesPage)
