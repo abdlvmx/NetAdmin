@@ -27,6 +27,7 @@ import (
 	"netadmin/internal/ingest"
 	"netadmin/internal/netaccess"
 	"netadmin/internal/netiface"
+	"netadmin/internal/notify"
 	"netadmin/internal/version"
 	"netadmin/internal/web"
 	"netadmin/internal/winsvc"
@@ -524,6 +525,11 @@ func warnStaleAgent() {
 func runBackups(d *sql.DB, stop <-chan struct{}) {
 	t := time.NewTicker(10 * time.Minute)
 	defer t.Stop()
+	// Копирование не удаётся — состояние, а не событие: круг идёт каждые
+	// десять минут, и письмо на каждом означало бы шесть писем в час об одном
+	// и том же. Сообщаем о переходе в отказ и о возврате, как это сделано для
+	// сервисов и SNMP.
+	failing := false
 	for {
 		// Проверка в начале круга, а не только в конце: первая копия снимается
 		// сразу при входе, и без неё она успевала уйти в уже закрытую базу —
@@ -537,7 +543,7 @@ func runBackups(d *sql.DB, stop <-chan struct{}) {
 		if cfg.BackupIntervalHours > 0 {
 			dir, err := backup.Dir(config.DataDir(), cfg.BackupDir)
 			if err != nil {
-				log.Printf("резервное копирование: %v", err)
+				backupFailed(&failing, err)
 			} else {
 				due := true
 				if list := backup.List(dir); len(list) > 0 {
@@ -545,8 +551,12 @@ func runBackups(d *sql.DB, stop <-chan struct{}) {
 				}
 				if due {
 					if path, err := backup.Create(d, dir, cfg.BackupKeep); err != nil {
-						log.Printf("резервное копирование: %v", err)
+						backupFailed(&failing, err)
 					} else {
+						if failing {
+							notify.Message("Резервное копирование восстановилось: копия снята в " + path)
+							failing = false
+						}
 						log.Printf("резервная копия базы: %s", path)
 					}
 				}
@@ -558,6 +568,23 @@ func runBackups(d *sql.DB, stop <-chan struct{}) {
 		case <-t.C:
 		}
 	}
+}
+
+// backupFailed сообщает о несостоявшейся копии — один раз на отказ.
+//
+// Раньше единственным следом была строка в журнале службы. Журнал никто не
+// читает, а копии — единственная страховка от потери всего учёта разом: диск
+// кончился месяц назад, узнали в день, когда копия понадобилась.
+func backupFailed(failing *bool, err error) {
+	log.Printf("резервное копирование: %v", err)
+	if *failing {
+		return
+	}
+	*failing = true
+	notify.Message("Резервная копия базы не снялась: " + err.Error() +
+		"\n\nВесь учёт хранится в одном файле, и копии — единственная защита от " +
+		"его потери. Проверьте каталог копий и место на диске: " +
+		"Настройки → Резервные копии базы.")
 }
 
 // splitAddrs возвращает адреса для агентов и публичные адреса, которых на

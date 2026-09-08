@@ -354,6 +354,22 @@
 
     <div class="card">
       <div class="card-header"><span class="card-title">Резервные копии базы</span></div>
+
+      {{if .BackupProblem}}
+      <div class="banner err" style="margin-bottom:12px">
+        <b>Копии не снимаются.</b> {{.BackupProblem}}.<br>
+        Весь учёт лежит в одном файле, и копии — единственная защита от его потери.
+        Проверьте, что каталог доступен на запись и на диске есть место.
+      </div>
+      {{end}}
+      {{if .BackupSameVolume}}
+      <div class="banner" style="margin-bottom:12px;background:var(--amber-soft);color:var(--amber)">
+        <b>Копии лежат на том же диске, что и база.</b> От отказа диска —
+        а ради него копии и заводят — такая копия не спасёт: она умрёт вместе
+        с оригиналом. Укажите ниже каталог на другом диске или сетевую папку.
+      </div>
+      {{end}}
+
       <p class="text-muted" style="font-size:12px;margin-bottom:10px">
         Копия снимается средствами SQLite на работающей базе — останавливать сервер не нужно.
         В ней весь инвентарь, заявки и журнал действий, поэтому каталог копий стоит закрыть

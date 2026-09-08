@@ -76,6 +76,11 @@ type settingsData struct {
 	// OnboardingHidden — чек-лист первых шагов убран с дашборда: тогда
 	// настройки предлагают вернуть его, иначе о нём негде вспомнить.
 	OnboardingHidden bool
+	// BackupProblem — что не так с копиями прямо сейчас; пусто — всё в порядке.
+	BackupProblem string
+	// BackupSameVolume — каталог копий на том же диске, что и база: от отказа
+	// диска такая копия не спасает, а именно ради него всё и заводится.
+	BackupSameVolume bool
 	// Version — версия сборки сервера. Показывается, чтобы на вопрос «какая у
 	// вас версия» можно было ответить, не открывая консоль.
 	Version string
@@ -105,6 +110,8 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		agentRev, serverRev = ab.Short(), sb.Short()
 		agentDate = ab.Time.Local().Format("02.01.2006")
 	}
+	bs := backupStatus(cfg)
+	bs.InstallAge, bs.InstallKnown = a.installedFor()
 	var backups []backup.Info
 	if dir, err := backupDir(cfg); err == nil {
 		backups = backup.List(dir)
@@ -149,6 +156,9 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		LocalAgentInstalled:  a.localAgentInstalled(),
 		AgentsTotal:          a.agentsTotal(),
 		OnboardingHidden:     cfg.OnboardingHidden,
+
+		BackupProblem:    backupProblemText(bs),
+		BackupSameVolume: bs.SameVolume(config.DBPath()),
 
 		Version: version.Full(),
 
