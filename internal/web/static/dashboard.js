@@ -65,7 +65,11 @@
   async function refreshDashboard(){
     if(document.hidden) return;
     let d;
-    try{ d = await (await fetch('/api/devices/status')).json(); }catch(e){ return; }
+    try{
+      const response = await fetch('/api/devices/status');
+      if(!response.ok) return;
+      d = await response.json();
+    }catch(e){ return; }
     const s = d.summary || {}; const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
     const total=s.total||0, online=s.online||0, offline=s.offline||0, unknown=s.unknown||0;
     set('d-online', online); set('d-total', total); set('d-offline', offline);
@@ -75,7 +79,7 @@
     set('d-lg-on', online);   set('d-lg-on-pct', onPct+'%');
     set('d-lg-off', offline); set('d-lg-off-pct', dPct(offline,total)+'%');
     set('d-lg-unk', unknown); set('d-lg-unk-pct', dPct(unknown,total)+'%');
-    if(window.dashMarkUpdated) window.dashMarkUpdated(s.issues);
+    if(window.dashMarkUpdated) window.dashMarkUpdated(s.issues, d.issues_revision);
     const donut = document.getElementById('d-donut');
     if(donut && total){
       const on=online/total*100, off=on+offline/total*100;
@@ -90,11 +94,16 @@
   // понять, свежее ли перед тобой, было неоткуда.
   const stale = document.getElementById('issues-stale');
   const baseIssues = stale ? (parseInt(stale.dataset.base, 10) || 0) : 0;
+  const baseRevision = stale ? stale.dataset.revision : '';
   let lastOK = Date.now();
 
-  function markUpdated(issues){
+  function markUpdated(issues, revision){
     lastOK = Date.now();
-    if(stale && issues !== undefined && issues !== baseIssues) stale.style.display = '';
+    if(stale){
+      const changed = baseRevision && typeof revision === 'string'
+        ? revision !== baseRevision : issues !== undefined && issues !== baseIssues;
+      stale.style.display = changed ? '' : 'none';
+    }
   }
   function tickUpdated(){
     const el = document.getElementById('dash-updated');

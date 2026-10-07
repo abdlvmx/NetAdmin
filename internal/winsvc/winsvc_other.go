@@ -8,10 +8,12 @@ package winsvc
 func IsService() bool { return false }
 func Elevated() bool  { return false }
 
-func Install(Config) error   { return ErrUnsupported }
-func Uninstall(string) error { return ErrUnsupported }
-func Stop(string) error      { return ErrUnsupported }
-func Restart(string) error   { return ErrUnsupported }
+func Install(Config) error          { return ErrUnsupported }
+func Uninstall(string) error        { return ErrUnsupported }
+func Stop(string) error             { return ErrUnsupported }
+func Restart(string) error          { return ErrUnsupported }
+func Start(string) error            { return ErrUnsupported }
+func ProcessID(string) (int, error) { return 0, ErrUnsupported }
 
 func State(string) (string, error) { return "", ErrUnsupported }
 

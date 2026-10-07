@@ -3,6 +3,7 @@
 package winsvc
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"time"
@@ -72,22 +73,26 @@ func Install(c Config) error {
 		if err := s.UpdateConfig(conf); err != nil {
 			return fmt.Errorf("обновление службы: %w", err)
 		}
-	} else {
+	} else if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		s, err = m.CreateService(c.Name, c.Exe, conf, c.Args...)
 		if err != nil {
 			return fmt.Errorf("создание службы: %w", err)
 		}
 		defer s.Close()
+	} else {
+		return fmt.Errorf("чтение службы: %w", err)
 	}
 
 	// Перезапуск при падении. Ради этого служба и выбрана вместо задачи
 	// планировщика: задача с триггером onstart поднимает процесс только
 	// при загрузке, а упавший агент оставался лежать до перезагрузки.
-	_ = s.SetRecoveryActions([]mgr.RecoveryAction{
+	if err := s.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 10 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 60 * time.Second},
-	}, 86400)
+	}, 86400); err != nil {
+		return fmt.Errorf("настройка восстановления службы: %w", err)
+	}
 
 	if err := s.Start(); err != nil {
 		return fmt.Errorf("запуск службы: %w", err)
@@ -113,7 +118,10 @@ func Uninstall(name string) error {
 
 	s, err := m.OpenService(name)
 	if err != nil {
-		return nil // службы нет — цель достигнута
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			return nil
+		}
+		return fmt.Errorf("чтение службы: %w", err)
 	}
 	defer s.Close()
 
@@ -138,7 +146,10 @@ func Stop(name string) error {
 
 	s, err := m.OpenService(name)
 	if err != nil {
-		return nil // не установлена — останавливать нечего
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			return nil
+		}
+		return fmt.Errorf("чтение службы перед остановкой: %w", err)
 	}
 	defer s.Close()
 	return stop(s)
@@ -170,7 +181,53 @@ func Restart(name string) error {
 	if err := s.Start(); err != nil {
 		return fmt.Errorf("запуск службы: %w", err)
 	}
-	return nil
+	return waitRunning(s)
+}
+
+// Start starts an existing service without rewriting its configuration.
+func Start(name string) error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("менеджер служб: %w", err)
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(name)
+	if err != nil {
+		return fmt.Errorf("служба %s: %w", name, err)
+	}
+	defer s.Close()
+	st, err := s.Query()
+	if err != nil {
+		return err
+	}
+	if st.State != svc.Running {
+		if err := s.Start(); err != nil {
+			return fmt.Errorf("запуск службы: %w", err)
+		}
+	}
+	return waitRunning(s)
+}
+
+// ProcessID identifies the running process for readiness verification.
+func ProcessID(name string) (int, error) {
+	m, err := mgr.Connect()
+	if err != nil {
+		return 0, err
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(name)
+	if err != nil {
+		return 0, err
+	}
+	defer s.Close()
+	st, err := s.Query()
+	if err != nil {
+		return 0, err
+	}
+	if st.State != svc.Running || st.ProcessId == 0 {
+		return 0, fmt.Errorf("служба %s не работает", name)
+	}
+	return int(st.ProcessId), nil
 }
 
 // State возвращает состояние службы одним из State* значений.
@@ -183,7 +240,10 @@ func State(name string) (string, error) {
 
 	s, err := m.OpenService(name)
 	if err != nil {
-		return StateNotInstalled, nil
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			return StateNotInstalled, nil
+		}
+		return "", fmt.Errorf("чтение состояния службы: %w", err)
 	}
 	defer s.Close()
 

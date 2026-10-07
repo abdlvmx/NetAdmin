@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
 	"math"
 	"net/http"
+	"sort"
+	"strings"
 
 	"netadmin/internal/auth"
 	"netadmin/internal/config"
@@ -46,14 +50,15 @@ type dashData struct {
 	User   *auth.User
 	Active string
 	// Onboarding — чек-лист первых шагов; nil, когда показывать нечего.
-	Onboarding    *onboarding
-	Stats         dashStats
-	Donut         donutData
-	TopDevices    []deviceLoad
-	Issues        []issueGroup
-	IssuesTotal   int
-	Activity      []auditRow
-	LastHeartbeat string
+	Onboarding     *onboarding
+	Stats          dashStats
+	Donut          donutData
+	TopDevices     []deviceLoad
+	Issues         []issueGroup
+	IssuesTotal    int
+	IssuesRevision string
+	Activity       []auditRow
+	LastHeartbeat  string
 }
 
 // Dashboard — GET /dashboard.
@@ -90,18 +95,53 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 
 	issues := a.issueGroups()
 	data := dashData{
-		User:          user,
-		Active:        "dashboard",
-		Onboarding:    a.onboardingFor(user, config.Load()),
-		Stats:         s,
-		Donut:         buildDonut(s.DevicesOnline, s.DevicesOffline, s.DevicesTotal),
-		TopDevices:    a.topDevices(),
-		Issues:        issues,
-		IssuesTotal:   issuesTotal(issues),
-		Activity:      a.recentActivity(),
-		LastHeartbeat: a.lastHeartbeat(),
+		User:           user,
+		Active:         "dashboard",
+		Onboarding:     a.onboardingFor(user, config.Load()),
+		Stats:          s,
+		Donut:          buildDonut(s.DevicesOnline, s.DevicesOffline, s.DevicesTotal),
+		TopDevices:     a.topDevices(),
+		Issues:         issues,
+		IssuesTotal:    issuesTotal(issues),
+		IssuesRevision: issuesRevision(issues),
+		Activity:       a.recentActivity(),
+		LastHeartbeat:  a.lastHeartbeat(),
 	}
 	web.RenderPage(w, "dashboard", data)
+}
+
+// issuesRevision отражает содержимое сводки, исключая изменяющуюся давность.
+// Порядок запросов или одинаково срочных строк не создаёт ложное обновление.
+func issuesRevision(groups []issueGroup) string {
+	stable := make([]issueGroup, len(groups))
+	for i, g := range groups {
+		stable[i] = g
+		stable[i].Items = append([]issueItem(nil), g.Items...)
+		for j := range stable[i].Items {
+			item := &stable[i].Items[j]
+			item.Age = ""
+			// Резервные копии показывают давность и в Detail. Сохраняем
+			// расписание, но не меняющийся текст «последняя — N ч назад».
+			if g.Cause == "Резервное копирование" && item.Title == "Копии перестали сниматься" {
+				if _, schedule, ok := strings.Cut(item.Detail, ", а расписание раз в "); ok {
+					item.Detail = "расписание раз в " + schedule
+				}
+			}
+		}
+		sort.Slice(stable[i].Items, func(j, k int) bool {
+			a, b := stable[i].Items[j], stable[i].Items[k]
+			if a.Href != b.Href {
+				return a.Href < b.Href
+			}
+			if a.Title != b.Title {
+				return a.Title < b.Title
+			}
+			return a.Detail < b.Detail
+		})
+	}
+	sort.Slice(stable, func(i, j int) bool { return stable[i].Cause < stable[j].Cause })
+	raw, _ := json.Marshal(stable) // только строки, числа и bool; Marshal не может вернуть ошибку.
+	return fmt.Sprintf("%x", sha256.Sum256(raw))
 }
 
 func pct(part, total int) int {

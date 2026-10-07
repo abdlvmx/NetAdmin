@@ -21,7 +21,8 @@ import (
 
 // downloadClient — отдельный клиент с большим таймаутом для скачивания дистрибутивов.
 var downloadClient = &http.Client{
-	Timeout: 30 * time.Minute,
+	Timeout:   30 * time.Minute,
+	Transport: directAgentTransport(),
 }
 
 // installPackage скачивает дистрибутив с сервера, проверяет SHA-256 и тихо ставит.

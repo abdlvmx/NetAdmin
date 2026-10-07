@@ -46,12 +46,13 @@ func TestDashboardIssuesRender(t *testing.T) {
 				{Title: "Принтер", Detail: "тонер 8%", Age: "2 мин", Href: "/snmp/3/ports"},
 			}},
 		},
-		IssuesTotal: 3,
+		IssuesTotal:    3,
+		IssuesRevision: "revision-123",
 	})
 	body := rec.Body.String()
 	for _, want := range []string{"Требует внимания", "Сервисы не отвечают", `href="/monitoring"`,
 		"Расходники и батареи на исходе", `href="/snmp/3/ports"`,
-		"1С", "tcp 192.168.1.5:1541", "12 мин", "Критично", "Внимание"} {
+		"1С", "tcp 192.168.1.5:1541", "12 мин", "Критично", "Внимание", `data-revision="revision-123"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("в выводе нет %q", want)
 		}
@@ -59,6 +60,29 @@ func TestDashboardIssuesRender(t *testing.T) {
 	// Критичное отличается от того, что просто требует внимания.
 	if !strings.Contains(body, "issue-dot crit") {
 		t.Fatal("критичная строка должна помечаться отдельно")
+	}
+}
+
+func TestIssuesRevisionIgnoresDisplayAge(t *testing.T) {
+	groups := []issueGroup{{Cause: "Нет связи", Crit: true, Total: 1, Href: "/devices?alerts=1",
+		Items: []issueItem{{Title: "PC-1", Detail: "не отвечает", Age: "1 мин", Href: "/devices/1"}}},
+		{Cause: "Резервное копирование", Crit: true, Total: 1, Href: "/settings",
+			Items: []issueItem{{Title: "Копии перестали сниматься", Detail: "последняя — 2 дн назад, а расписание раз в 12 ч", Age: "2 дн", Href: "/settings"}}},
+	}
+	first := issuesRevision(groups)
+	if groups[0].Items[0].Age != "1 мин" || !strings.Contains(groups[1].Items[0].Detail, "2 дн") {
+		t.Fatal("расчёт ревизии изменил отображаемые данные")
+	}
+	groups[0].Items[0].Age = "2 мин"
+	groups[1].Items[0].Age = "3 дн"
+	groups[1].Items[0].Detail = "последняя — 3 дн назад, а расписание раз в 12 ч"
+	groups[0], groups[1] = groups[1], groups[0]
+	if got := issuesRevision(groups); got != first {
+		t.Fatalf("обычное течение времени изменило ревизию: %s -> %s", first, got)
+	}
+	groups[0].Items[0].Detail = "последняя — 3 дн назад, а расписание раз в 24 ч"
+	if got := issuesRevision(groups); got == first {
+		t.Fatal("изменение расписания не обновило ревизию проблемы")
 	}
 }
 
@@ -170,8 +194,8 @@ func TestIssuesTrimsLongList(t *testing.T) {
 // не отчитывалась ни разу, его нет, и «53 года назад» хуже пустоты.
 func TestHumanAgo(t *testing.T) {
 	cases := map[string]string{
-		"":                    "",
-		"мусор":               "",
+		"":      "",
+		"мусор": "",
 		time.Now().UTC().Add(-30 * time.Second).Format("2006-01-02 15:04:05"): "только что",
 		time.Now().UTC().Add(-42 * time.Minute).Format("2006-01-02 15:04:05"): "42 мин",
 		time.Now().UTC().Add(-5 * time.Hour).Format("2006-01-02 15:04:05"):    "5 ч",

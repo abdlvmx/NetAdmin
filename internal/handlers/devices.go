@@ -23,6 +23,7 @@ type deviceRow struct {
 	OSType       string `json:"os_type"`
 	Status       string `json:"status"`
 	LastSeen     string `json:"last_seen"`
+	LastSeenSort string `json:"-"`
 	DeviceType   string `json:"device_type"`
 	Manufacturer string `json:"manufacturer"`
 	Model        string `json:"model"`
@@ -179,6 +180,7 @@ func (a *App) listDevices() []deviceRow {
 				d.OpenPorts = append(d.OpenPorts, n)
 			}
 		}
+		d.LastSeenSort = d.LastSeen
 		d.LastSeen = tz.DateTime(d.LastSeen)
 		out = append(out, d)
 	}

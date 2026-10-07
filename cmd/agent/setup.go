@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"netadmin/internal/instdir"
 	"netadmin/internal/wincon"
 	"netadmin/internal/winsvc"
 )
@@ -87,12 +88,16 @@ func askUntil(prompt string) (string, bool) {
 // точно ли перенастраивать. Ставить агента поверх работающего вслепую — способ
 // потерять связь с сервером, на котором устройство уже числится.
 func confirmReconfigure() bool {
-	st := loadState()
+	cfg, st, err := readInstallIdentity(instdir.Path())
+	if err != nil {
+		fmt.Println("  ОШИБКА:", err)
+		return false
+	}
 	switch {
 	case st.DeviceID > 0:
 		fmt.Printf("  Этот компьютер уже зарегистрирован на сервере (устройство #%d).\n", st.DeviceID)
-		fmt.Printf("  Сервер: %s\n\n", serverURL)
-		if !wincon.AskYesNo("  Настроить заново на другой сервер?") {
+		fmt.Printf("  Сервер: %s\n\n", cfg.ServerURL)
+		if !wincon.AskYesNo("  Изменить настройки агента?") {
 			fmt.Println("\n  Ничего не меняю. Проверить связь: agent.exe -check")
 			return false
 		}
@@ -107,11 +112,22 @@ func confirmReconfigure() bool {
 
 // applySetup ставит агента с собранными значениями, запросив права у Windows.
 func applySetup(server, code string) bool {
+	transfer, keep, ok := confirmRegistrationChange(instdir.Path(), server)
+	if !ok {
+		return false
+	}
 	if !winsvc.Elevated() {
 		fmt.Println("\n  Запрашиваю права администратора...")
 		// Значения передаются запущенной копии: спрашивать их второй раз,
 		// уже в другом окне, незачем.
-		started, err := wincon.Elevate("-install", "-server="+server, "-token="+code)
+		args := []string{"-install", "-server=" + server, "-token=" + code}
+		if transfer {
+			args = append(args, "-transfer")
+		}
+		if keep {
+			args = append(args, "-keep-registration")
+		}
+		started, err := wincon.Elevate(args...)
 		if err != nil {
 			fmt.Println("\n  ОШИБКА:", err)
 			return false
@@ -120,7 +136,7 @@ func applySetup(server, code string) bool {
 			return true // работу продолжит запущенная с правами копия
 		}
 	}
-	if err := installAgent(server, code); err != nil {
+	if err := installAgent(server, code, transfer, keep); err != nil {
 		fmt.Println("\n  ОШИБКА:", err)
 		return false
 	}
@@ -129,6 +145,21 @@ func applySetup(server, code string) bool {
 
 // runInteractiveSetup вызывается из main при запуске двойным щелчком.
 func runInteractiveSetup() {
+	// Настройки установленного агента доступны администраторам и SYSTEM.
+	// Получаем права до диалога: запуск скачанного файла должен увидеть
+	// прежнюю регистрацию в постоянном каталоге, а не только рядом с собой.
+	if !winsvc.Elevated() {
+		fmt.Println("\n  Запрашиваю права администратора для установки...")
+		started, err := wincon.Elevate("-setup")
+		if err != nil {
+			fmt.Println("\n  ОШИБКА:", err)
+			wincon.Hold()
+			return
+		}
+		if started {
+			return
+		}
+	}
 	fmt.Println()
 	fmt.Println("  ──────────────────────────────────────────────────────────")
 	fmt.Println("  NetAdmin — установка агента")
@@ -149,4 +180,40 @@ func runInteractiveSetup() {
 	}
 	wincon.Hold()
 	os.Exit(0)
+}
+
+// confirmRegistrationChange distinguishes an address change from a transfer.
+// Neither DNS nor the enrollment code proves these are the same database.
+func confirmRegistrationChange(dir, server string) (transfer, keep, ok bool) {
+	cfg, st, err := readInstallIdentity(dir)
+	if err != nil {
+		fmt.Println("\n  ОШИБКА:", err)
+		return false, false, false
+	}
+	if st.DeviceID == 0 && st.DeviceToken == "" {
+		return false, false, true
+	}
+	target, err := installServerURL(server)
+	if err != nil {
+		fmt.Println("\n  ОШИБКА:", err)
+		return false, false, false
+	}
+	previous, err := installServerURL(cfg.ServerURL)
+	if err == nil && previous == target {
+		return false, false, true
+	}
+	fmt.Printf("\n  Прежний сервер: %s\n  Новый адрес:    %s\n", cfg.ServerURL, target)
+	fmt.Println("  1 — тот же сервер, изменился только адрес: сохранить регистрацию.")
+	fmt.Println("  2 — другой сервер: сохранить копию прежней регистрации и получить новую.")
+	choice, accepted := wincon.AskLine("  Выберите 1 или 2; Enter — отмена: ")
+	if accepted {
+		switch strings.TrimSpace(choice) {
+		case "1":
+			return false, true, true
+		case "2":
+			return true, false, true
+		}
+	}
+	fmt.Println("\n  Отменено. Прежняя регистрация сохранена.")
+	return false, false, false
 }

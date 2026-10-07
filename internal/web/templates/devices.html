@@ -9,6 +9,12 @@
   .bulk-bar[hidden] { display: none; }
   .bulk-bar select, .bulk-bar input { width: auto; min-width: 170px; }
   .bulk-count { font-size: var(--fs-sm); color: var(--muted); margin-right: 4px; }
+  .bulk-hidden { color: var(--amber); font-size: var(--fs-sm); }
+  .list-summary { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: -4px 0 12px; color: var(--muted); font-size: var(--fs-sm); }
+  .bulk-review-list { list-style: none; max-height: 45vh; overflow: auto; margin-top: 14px; }
+  .bulk-review-list li { padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .bulk-review-list strong, .bulk-review-list span { display: block; }
+  .bulk-review-list span { font-size: var(--fs-sm); color: var(--muted); }
   .device-name { font-weight: 600; white-space: nowrap; }
   .dev-link { color: var(--accent); text-decoration: none; }
   .dev-link:hover { text-decoration: underline; }
@@ -76,47 +82,53 @@
 </div>
 
 <div class="content">
-  <div class="toolbar">
-    <input type="text" placeholder="Поиск: хост, IP, владелец, расположение…" data-filter-target="#dev-body">
-    <select data-filter-target="#dev-body" data-col="status">
+  <div class="toolbar" id="device-filters" data-state-user="{{.User.ID}}">
+    <input type="search" aria-label="Поиск устройств" placeholder="Поиск: хост, IP, владелец, расположение…" data-filter-target="#dev-body" data-filter-key="q">
+    <select aria-label="Статус устройства" data-filter-target="#dev-body" data-col="status" data-filter-key="status">
       <option value="all">Все статусы</option>
       <option value="online">Онлайн</option>
       <option value="offline">Оффлайн</option>
       <option value="unknown">Неизвестно</option>
     </select>
-    <select data-filter-target="#dev-body" data-col="agent">
+    <select aria-label="Наличие агента" data-filter-target="#dev-body" data-col="agent" data-filter-key="agent">
       <option value="all">Агент: любой</option>
       <option value="yes">Агент установлен</option>
       <option value="no">Без агента</option>
     </select>
-    <select data-filter-target="#dev-body" data-col="alert">
+    <select aria-label="Проблемы устройств" data-filter-target="#dev-body" data-col="alert" data-filter-key="alerts">
       <option value="all">Все устройства</option>
       <option value="1">Только с проблемами</option>
     </select>
     <a href="/devices/export" class="btn btn-ghost">Экспорт CSV</a>
   </div>
+  <div class="list-summary">
+    <span id="dev-count" role="status" aria-live="polite">Устройств: {{len .Devices}}</span>
+    <button class="btn btn-ghost btn-sm" type="button" data-act="resetDeviceFilters">Сбросить фильтры</button>
+  </div>
   <div class="card">
     {{if .User.CanWrite}}
     <form method="post" action="/devices/bulk" id="bulk-form" class="bulk-bar" hidden
-          data-confirm="Применить действие к выбранным устройствам?">
+          data-act-submit="bulkConfirm">
       <span class="bulk-count"><b id="bulk-n">0</b> выбрано</span>
-      <select name="action" id="bulk-action">
+      <span class="bulk-hidden" id="bulk-hidden" hidden></span>
+      <button class="btn btn-ghost btn-sm" type="button" data-act="bulkReview">Посмотреть выбор</button>
+      <select name="action" id="bulk-action" aria-label="Групповое действие">
         <option value="location">Расположение</option>
         <option value="employee">Владелец</option>
         <option value="type">Тип устройства</option>
         <option value="critical">Важность</option>
         {{if .User.IsAdmin}}<option value="delete">Удалить</option>{{end}}
       </select>
-      <input type="text" name="value" id="bulk-text" placeholder="напр. каб. 201">
-      <select name="value" id="bulk-employee" hidden>
+      <input type="text" name="value" id="bulk-text" aria-label="Новое значение" placeholder="напр. каб. 201">
+      <select name="value" id="bulk-employee" aria-label="Новый владелец" hidden>
         <option value="">— без владельца —</option>
         {{range .Employees}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
       </select>
-      <select name="value" id="bulk-critical" hidden>
+      <select name="value" id="bulk-critical" aria-label="Важность устройства" hidden>
         <option value="1">Критически важное</option>
         <option value="0">Обычное</option>
       </select>
-      <button class="btn btn-primary btn-sm" type="submit">Применить</button>
+      <button class="btn btn-primary btn-sm" type="submit">Применить…</button>
       <button class="btn btn-ghost btn-sm" type="button" data-act="bulkClear">Снять выбор</button>
     </form>
     {{end}}
@@ -125,15 +137,15 @@
       <table>
         <thead>
           <tr>
-            {{if .User.CanWrite}}<th style="width:28px"><input type="checkbox" id="dev-all" title="Выбрать все видимые" style="width:auto"></th>{{end}}
-            <th data-sort title="Сортировка по IP-адресу (по возрастанию / убыванию)">Хост / IP</th><th>Инвентарь</th><th>Владелец</th>
-            <th>Расположение</th><th data-sort title="Установлен ли агент на устройстве">Агент</th><th data-sort>Статус</th><th data-sort>Онлайн</th><th></th>
+            {{if .User.CanWrite}}<th style="width:28px"><input type="checkbox" id="dev-all" aria-label="Выбрать все видимые устройства" title="Выбрать все видимые" style="width:auto"></th>{{end}}
+            <th data-sort data-sort-key="ip" title="Сортировка по IP-адресу (по возрастанию / убыванию)">Хост / IP</th><th>Инвентарь</th><th>Владелец</th>
+            <th>Расположение</th><th data-sort data-sort-key="agent" title="Установлен ли агент на устройстве">Агент</th><th data-sort data-sort-key="status">Статус</th><th data-sort data-sort-key="seen" data-sort-type="text">Последний онлайн</th><th></th>
           </tr>
         </thead>
         <tbody id="dev-body">
           {{range .Devices}}
           <tr id="row-{{.ID}}" data-status="{{.Status}}" data-alert="{{if .Alert}}1{{else}}0{{end}}" data-agent="{{if .HasToken}}yes{{else}}no{{end}}">
-            {{if $.User.CanWrite}}<td><input type="checkbox" class="dev-pick" value="{{.ID}}" style="width:auto"></td>{{end}}
+            {{if $.User.CanWrite}}<td><input type="checkbox" class="dev-pick" value="{{.ID}}" aria-label="Выбрать {{.Hostname}}" style="width:auto"></td>{{end}}
             <td data-sort-val="{{.IP}}">
               <div class="device-name"><a href="/devices/{{.ID}}" class="dev-link">{{.Hostname}}</a>{{if .Critical}} <span class="badge badge-amber" style="font-size:10px" title="критически важное — мониторинг доступности">★</span>{{end}}</div>
               <div class="device-meta">{{if .IP}}{{.IP}}{{else}}—{{end}}{{if .MAC}} · {{.MAC}}{{end}}</div>
@@ -151,7 +163,7 @@
             {{$owner := ""}}{{if .EmployeeName}}{{$owner = .EmployeeName}}{{else if .OwnerName}}{{$owner = .OwnerName}}{{end}}
             <td class="cell-tight" title="{{$owner}}">{{if $owner}}{{$owner}}{{else}}—{{end}}</td>
             <td class="cell-tight text-muted" title="{{.Location}}">{{if .Location}}{{.Location}}{{else}}—{{end}}</td>
-            <td data-sort-val="{{if .HasToken}}1{{else}}0{{end}}">
+            <td id="agent-{{.ID}}" data-sort-val="{{if .HasToken}}1{{else}}0{{end}}">
               {{if .HasToken}}<span class="badge badge-green" title="агент установлен и зарегистрирован">✓ агент</span>
               {{else}}<span class="text-muted">—</span>{{end}}
             </td>
@@ -160,7 +172,7 @@
               {{else if eq .Status "offline"}}<span class="badge badge-red">оффлайн</span>
               {{else}}<span class="badge badge-gray">неизвестно</span>{{end}}
             </td>
-            <td id="seen-{{.ID}}" class="text-muted" style="white-space:nowrap">{{if .LastSeen}}{{.LastSeen}}{{else}}—{{end}}</td>
+            <td id="seen-{{.ID}}" data-sort-val="{{.LastSeenSort}}" class="text-muted" style="white-space:nowrap">{{if .LastSeen}}{{.LastSeen}}{{else}}—{{end}}</td>
             <td>
               <div class="row-actions">
                 <a class="btn btn-ghost btn-sm" href="/devices/{{.ID}}" title="Открыть страницу устройства">Открыть</a>
@@ -172,11 +184,12 @@
             </td>
           </tr>
           {{else}}
-          <tr><td colspan="9" class="empty">Устройств нет. Добавьте вручную или запустите агента.</td></tr>
+          <tr data-filter-empty><td colspan="9" class="empty">Устройств нет. Добавьте вручную или запустите агента.</td></tr>
           {{end}}
         </tbody>
       </table>
     </div>
+    <div id="dev-filter-empty" class="empty" hidden>По выбранным фильтрам устройства не найдены. Измените условия или сбросьте фильтры.</div>
   </div>
 </div>
 
@@ -192,6 +205,21 @@
     </form>
   </div>
 </div>
+
+{{if .User.CanWrite}}
+<div class="modal-overlay" id="modal-bulk-review" data-modal-overlay="modal-bulk-review">
+  <div class="modal modal-wide">
+    <h3>Проверить групповое действие</h3>
+    <p id="bulk-review-action" style="margin-top:12px"></p>
+    <p id="bulk-review-count" class="text-muted" style="margin-top:6px"></p>
+    <ul id="bulk-review-list" class="bulk-review-list"></ul>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" data-modal-close="modal-bulk-review">Отмена</button>
+      <button type="button" class="btn btn-primary" id="bulk-review-apply" data-act="bulkApply">Применить</button>
+    </div>
+  </div>
+</div>
+{{end}}
 
 {{end}}
 

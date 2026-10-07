@@ -10,7 +10,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"netadmin/internal/agentstatus"
+	"netadmin/internal/installtxn"
 	"netadmin/internal/instdir"
 	"netadmin/internal/winsvc"
 )
@@ -38,7 +41,7 @@ func agentExePath() string { return filepath.Join(agentInstallDir(), "agent.exe"
 // installAgent ставит агента службой. Пустые server/token берутся из настроек,
 // уже лежащих в каталоге установки: так переустановка поверх (обновление
 // версии) не требует заново указывать адрес и токен.
-func installAgent(server, tok string) error {
+func installAgent(server, tok string, transfer, keepRegistration bool) error {
 	if !winsvc.Elevated() {
 		return fmt.Errorf("нужны права администратора: откройте PowerShell «от имени администратора» и повторите")
 	}
@@ -51,70 +54,142 @@ func installAgent(server, tok string) error {
 	if err != nil {
 		return err
 	}
-	existing := loadAgentConfigFrom(dir)
-
-	if server == "" {
-		server = existing.ServerURL
-	}
-	if server == "" {
-		return fmt.Errorf("не указан адрес сервера: agent.exe -install -server=http://192.168.1.10:8765 -token=…\n" +
-			"адрес и токен показывает страница «Настройки» на сервере")
-	}
-	if tok == "" {
-		tok = existing.EnrollToken
-	}
-	// Токен нужен только для первой регистрации: если устройство уже
-	// зарегистрировано, у него есть персональный токен в agent_state.json,
-	// и требовать enrollment-токен при обновлении версии незачем.
-	if tok == "" {
-		if _, err := os.Stat(filepath.Join(dir, "agent_state.json")); err != nil {
-			return fmt.Errorf("не указан enrollment-токен: agent.exe -install -server=… -token=ТОКЕН\n" +
-				"токен показывает страница «Настройки» на сервере")
-		}
-	}
-
 	src, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("путь к текущему файлу: %w", err)
 	}
 	dst := agentExePath()
-
-	// Файл работающей службы Windows подменить не даёт — сначала остановка.
-	if err := winsvc.Stop(agentServiceName); err != nil {
+	copySource := src
+	if samePath(src, dst) {
+		// Windows не позволяет заменить EXE самого установщика. При запуске
+		// из постоянного каталога меняются только настройки и регистрация.
+		copySource = ""
+	}
+	plan, err := planAgentInstall(dir, copySource, server, tok, transfer, keepRegistration, time.Now())
+	if err != nil {
 		return err
 	}
-	if !samePath(src, dst) {
-		if err := copyFile(src, dst); err != nil {
-			return fmt.Errorf("копирование в %s: %w", dst, err)
-		}
+	fmt.Println("1/4 Проверяю файл агента и доступность сервера...")
+	if err := checkInstallBinary(src); err != nil {
+		return err
 	}
-
-	if err := saveAgentConfigTo(dir, agentConfig{ServerURL: server, EnrollToken: tok}); err != nil {
-		return fmt.Errorf("запись настроек: %w", err)
+	if err := checkInstallServer(plan.Config.ServerURL); err != nil {
+		return err
 	}
-
-	// Установка поверх старого агента из install_agent.bat: задача планировщика
-	// с тем же именем подняла бы вторую копию рядом со службой.
-	removeLegacyTask()
-
-	if err := winsvc.Install(winsvc.Config{
+	var previous string
+	restoreConfig := func() error { return nil }
+	metadataCaptured := false
+	service := winsvc.Config{
 		Name:        agentServiceName,
 		DisplayName: agentServiceDisplay,
 		Description: agentServiceDesc,
 		Exe:         dst,
-	}); err != nil {
-		return err
 	}
+	var startedAt time.Time
+	startAttempted := false
+	err = installtxn.Apply(plan.Files, installtxn.Hooks{
+		Stop: func() error {
+			if !startAttempted {
+				if err := checkInstallUpdatePending(dir); err != nil {
+					return err
+				}
+				if !metadataCaptured {
+					previous, err = winsvc.State(agentServiceName)
+					if err != nil {
+						return err
+					}
+					restoreConfig, err = winsvc.CaptureConfig(agentServiceName)
+					if err != nil {
+						return err
+					}
+					metadataCaptured = true
+				}
+			}
+			fmt.Println("2/4 Файлы подготовлены. Останавливаю службу для установки...")
+			if err := winsvc.Stop(agentServiceName); err != nil {
+				return err
+			}
+			if !startAttempted {
+				// A request may have completed while Stop was waiting for the
+				// old service's last iteration. The transaction lock also keeps
+				// its helper from replacing files concurrently with this install.
+				return checkInstallUpdatePending(dir)
+			}
+			return nil
+		},
+		Start: func() error {
+			fmt.Println("3/4 Запускаю службу агента...")
+			startedAt = time.Now()
+			startAttempted = true
+			return winsvc.Install(service)
+		},
+		Verify: func() error {
+			fmt.Println("4/4 Ожидаю подтверждённую регистрацию и передачу данных на сервер...")
+			if err := agentstatus.Wait(dir, plan.Config.ServerURL, agentVersion, startedAt, 60*time.Second); err != nil {
+				return err
+			}
+			pid, err := winsvc.ProcessID(agentServiceName)
+			if err != nil {
+				return err
+			}
+			status, err := agentstatus.Read(dir)
+			if err != nil {
+				return err
+			}
+			if !status.Matches(plan.Config.ServerURL, agentVersion, startedAt) || status.ProcessID != pid {
+				return fmt.Errorf("подключение подтвердил другой процесс агента; проверка установленной службы не пройдена")
+			}
+			_, identity, err := readInstallIdentity(dir)
+			if err != nil {
+				return err
+			}
+			if identity.DeviceID != status.DeviceID || identity.DeviceToken == "" {
+				return fmt.Errorf("сервер получил данные, но персональная регистрация не сохранена в agent_state.json; проверьте доступ и свободное место в %s", dir)
+			}
+			return nil
+		},
+		Recover: func() error {
+			if metadataCaptured && previous != winsvc.StateNotInstalled {
+				if err := restoreConfig(); err != nil {
+					return err
+				}
+			}
+			if previous == winsvc.StateRunning {
+				return winsvc.Start(agentServiceName)
+			}
+			if previous == winsvc.StateNotInstalled && startAttempted {
+				return winsvc.Uninstall(agentServiceName)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("установка агента не подтверждена: %w\nЖурнал: %s\nПроверка: \"%s\" -check", err, agentLogPath(), dst)
+	}
+	// Задачу прежнего установщика снимаем после подтверждённой установки:
+	// сбой подготовки не должен менять способ запуска действующего агента.
+	removeLegacyTask()
 
-	fmt.Println("Агент NetAdmin установлен и запущен.")
-	fmt.Printf("  Сервер:    %s\n", normalizeServerURL(server))
+	fmt.Println("Агент NetAdmin установлен: регистрация подтверждена, сервер получил данные.")
+	fmt.Printf("  Сервер:    %s\n", plan.Config.ServerURL)
 	fmt.Printf("  Каталог:   %s\n", dir)
 	if tightened {
 		fmt.Println("  Доступ к каталогу ограничен SYSTEM и администраторами (был открыт).")
 	}
-	fmt.Println()
-	fmt.Println("Если устройство не появится на сервере в течение минуты:")
-	fmt.Printf("  \"%s\" -check\n", dst)
+	if plan.ArchivePath != "" {
+		fmt.Printf("  Прежняя регистрация: %s\n", plan.ArchivePath)
+	}
+	return nil
+}
+
+func checkInstallBinary(path string) error {
+	version, err := probeBinaryTimeout(path, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("проверка файла агента до остановки службы: %w", err)
+	}
+	if version != agentVersion {
+		return fmt.Errorf("файл агента сообщает другую версию; действующая служба пока не остановлена")
+	}
 	return nil
 }
 
@@ -132,7 +207,7 @@ func uninstallAgent() error {
 	removeLegacyTask()
 
 	dir := agentInstallDir()
-	for _, name := range []string{"agent_config.json", "agent_state.json", "agent.exe"} {
+	for _, name := range []string{"agent_config.json", "agent_state.json", "agent_status.json", "agent_update_result.json", "agent_update.json", "agent_update.json.rejected", "agent-update-helper.exe", "agent.exe.new", "agent.exe"} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
 			// agent.exe может быть занят, если удаление запущено из него же —
 			// это нормально, файл уберёт следующая установка

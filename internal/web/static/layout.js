@@ -23,7 +23,7 @@
       if (ok || err) {
         p.delete('message'); p.delete('error');
         var q = p.toString();
-        history.replaceState(null, '', location.pathname + (q ? '?' + q : ''));
+        history.replaceState(history.state, '', location.pathname + (q ? '?' + q : ''));
       }
     } catch (e) {}
   })();
@@ -70,8 +70,11 @@
     function applyGroup(sel, ctrls) {
       const tbody = document.querySelector(sel);
       if (!tbody) return;
+      let total = 0, shown = 0;
       tbody.querySelectorAll('tr').forEach(function (tr) {
         if (!tr.querySelector('td')) return;
+        if (tr.hasAttribute('data-filter-empty')) return;
+        total++;
         let show = true;
         for (const c of ctrls) {
           const v = (c.value || '').trim().toLowerCase();
@@ -82,7 +85,9 @@
           } else if (!tr.textContent.toLowerCase().includes(v)) show = false;
         }
         tr.style.display = show ? '' : 'none';
+        if (show) shown++;
       });
+      tbody.dispatchEvent(new CustomEvent('table:filtered', { bubbles: true, detail: { shown: shown, total: total } }));
     }
     // ipToInt — IPv4 «a.b.c.d» → 32-битное число для корректной сортировки (или null).
     function ipToInt(s) {
@@ -92,15 +97,14 @@
       if (p.some(function (n) { return n > 255; })) return null;
       return ((p[0] * 256 + p[1]) * 256 + p[2]) * 256 + p[3];
     }
-    document.querySelectorAll('th[data-sort]').forEach(function (th) {
-      th.addEventListener('click', function () {
+    function sortTable(th, asc) {
         const table = th.closest('table');
         const tbody = table.querySelector('tbody');
         const idx = Array.prototype.indexOf.call(th.parentNode.children, th);
-        const asc = th.dataset.asc !== 'true';
-        th.parentNode.querySelectorAll('th[data-sort]').forEach(function (o) { if (o !== th) o.removeAttribute('data-asc'); });
+        th.parentNode.querySelectorAll('th[data-sort]').forEach(function (o) { if (o !== th) { o.removeAttribute('data-asc'); o.removeAttribute('aria-sort'); } });
         th.dataset.asc = asc;
-        const rows = Array.prototype.slice.call(tbody.querySelectorAll('tr')).filter(function (r) { return r.querySelector('td'); });
+        th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+        const rows = Array.prototype.slice.call(tbody.querySelectorAll('tr')).filter(function (r) { return r.querySelector('td') && !r.hasAttribute('data-filter-empty'); });
         // ключ сортировки: data-sort-val ячейки (если задан) иначе её текст
         const keyOf = function (r) {
           const c = r.children[idx];
@@ -112,7 +116,8 @@
           let cmp;
           const ix = ipToInt(x), iy = ipToInt(y);
           const nx = parseFloat(x.replace(',', '.')), ny = parseFloat(y.replace(',', '.'));
-          if (ix !== null && iy !== null) cmp = ix - iy;            // оба — IPv4: числовая сортировка
+          if (th.dataset.sortType === 'text') cmp = x.localeCompare(y, 'ru');
+          else if (ix !== null && iy !== null) cmp = ix - iy;        // оба — IPv4: числовая сортировка
           else if (ix !== null) cmp = -1;                           // адреса выше «прочерков»/пустых
           else if (iy !== null) cmp = 1;
           else if (!isNaN(nx) && !isNaN(ny)) cmp = nx - ny;         // оба числа
@@ -120,6 +125,19 @@
           return asc ? cmp : -cmp;
         });
         rows.forEach(function (r) { tbody.appendChild(r); });
+        table.dispatchEvent(new CustomEvent('table:sorted', { bubbles: true }));
+    }
+    window.tableFilters = {
+      apply: function (key) { if (groups[key]) applyGroup(key, groups[key]); },
+      sort: sortTable
+    };
+    document.querySelectorAll('th[data-sort]').forEach(function (th) {
+      th.tabIndex = 0;
+      th.addEventListener('click', function () {
+        sortTable(th, th.dataset.asc !== 'true');
+      });
+      th.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortTable(th, th.dataset.asc !== 'true'); }
       });
     });
   })();
@@ -139,8 +157,65 @@
   // в window.actions — их вызывают с элементом и событием.
   window.actions = window.actions || {};
 
-  function openModal(id) { var m = document.getElementById(id); if (m) m.classList.add('open'); }
-  function closeModal(id) { var m = document.getElementById(id); if (m) m.classList.remove('open'); }
+  const modalOpeners = new WeakMap();
+  let modalOverflow = '';
+  function activeModal() {
+    const open = document.querySelectorAll('.modal-overlay.open');
+    return open.length ? open[open.length - 1] : null;
+  }
+  function modalControls(m) {
+    return [...m.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')]
+      .filter(el => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length);
+  }
+  function focusModal(m) {
+    const panel = m.querySelector('.modal') || m;
+    (modalControls(m)[0] || panel).focus();
+  }
+  function openModal(id) {
+    const m = document.getElementById(id);
+    if (!m || m.classList.contains('open')) return;
+    modalOpeners.set(m, document.activeElement);
+    if (!activeModal()) { modalOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; }
+    const panel = m.querySelector('.modal') || m;
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.tabIndex = -1;
+    const title = panel.querySelector('h3');
+    if (title) {
+      if (!title.id) title.id = id + '-title';
+      panel.setAttribute('aria-labelledby', title.id);
+    }
+    m.classList.add('open');
+    focusModal(m);
+  }
+  function closeModal(id) {
+    const m = document.getElementById(id);
+    if (!m || !m.classList.contains('open')) return;
+    m.classList.remove('open');
+    const next = activeModal();
+    if (!next) document.body.style.overflow = modalOverflow;
+    const opener = modalOpeners.get(m);
+    if (opener && opener.isConnected && (!next || next.contains(opener))) opener.focus();
+    else if (next) focusModal(next);
+  }
+  document.addEventListener('keydown', function (e) {
+    const m = activeModal();
+    if (!m) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeModal(m.id); return; }
+    if (e.key !== 'Tab') return;
+    const controls = modalControls(m);
+    const first = controls[0], last = controls[controls.length - 1];
+    if (!first) { e.preventDefault(); focusModal(m); }
+    else if (e.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) {
+      e.preventDefault(); first.focus();
+    }
+  });
+  document.addEventListener('focusin', function (e) {
+    const m = activeModal();
+    if (m && !m.contains(e.target)) focusModal(m);
+  });
 
   function runAction(name, el, e) {
     var fn = window.actions[name];

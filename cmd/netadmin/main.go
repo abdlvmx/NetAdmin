@@ -54,22 +54,65 @@ func main() {
 		"задать новый пароль администратору, потерявшему доступ (спросит, кому)")
 	resetUser := flag.String("user", "",
 		"для -reset-password: чей пароль менять, если администраторов несколько")
+	welcome := flag.Bool("welcome", false, "открыть понятный мастер запуска в браузере")
 	flag.Parse()
+	// Version inspection must not generate settings beside the downloaded EXE.
+	if *showVersion {
+		fmt.Println("NetAdmin " + version.Full())
+		return
+	}
+	if *welcome && (flag.NFlag() != 1 || flag.NArg() != 0) {
+		fmt.Println("Мастер запуска открывается командой netadmin.exe -welcome без других аргументов.")
+		holdWindow()
+		os.Exit(1)
+	}
+	// Choose before config.Load: the welcome page needs no database or credentials.
+	if !winsvc.IsService() && (*welcome || askOnStart(flag.NFlag(), ownsConsole(), dataExists())) {
+		result, err := chooseWelcome(*welcome)
+		if err != nil {
+			fmt.Println("Не удалось открыть мастер запуска:", err)
+			fmt.Println("Можно выбрать действие в этом окне.")
+			result = welcomeResult{Choice: askFirstRun(), Firewall: firewallAsk}
+		}
+		switch result.Choice {
+		case choiceQuit:
+			return
+		case choiceAgent:
+			if err := launchWelcomeAgent(); err != nil {
+				fmt.Println("Не удалось открыть установку агента:", err)
+				holdWindow()
+			}
+			return
+		case choiceDemo:
+			*demoMode = true
+		case choiceInstall:
+			runServiceCommand(append([]string{"-install"}, firewallArgs(result.Firewall)...),
+				func() error { return installServer(result.Firewall) })
+			return
+		}
+	}
+	var installationGuardErr error
+	if winsvc.IsService() {
+		// Before config.Load can generate settings or InitSchema can migrate
+		// data, verify that SCM received the directory protected by installer.
+		installationGuardErr = checkServerInstallDataDir(installDir(), config.DataDir())
+	}
 
 	// Часовой пояс показа — до всего остального: его показывают и приветствие,
 	// и -status, и он должен быть один во всех ответах. Отказ не смертелен:
 	// сервер работает в зоне самой машины и жалуется в журнал — показывать
 	// местное время с жалобой честнее, чем чужое молча.
-	if err := tz.Set(config.Load().Timezone); err != nil {
-		log.Printf("часовой пояс: %v; показываю время в зоне сервера", err)
+	if installationGuardErr == nil && !*install && !*uninstall && !*restart {
+		zone := ""
+		if !*demoMode {
+			zone = config.Load().Timezone
+		}
+		if err := tz.Set(zone); err != nil {
+			log.Printf("часовой пояс: %v; показываю время в зоне сервера", err)
+		}
 	}
 
 	switch {
-	case *showVersion:
-		// Прав не требует и ничего не открывает: на вопрос «какая у вас версия»
-		// нужно уметь ответить, не запуская сервер.
-		fmt.Println("NetAdmin " + version.Full())
-		return
 	case *resetPw:
 		runServiceCommand(resetPasswordArgs(*resetUser),
 			func() error { return resetPassword(*resetUser) })
@@ -119,28 +162,15 @@ func main() {
 		// Ошибка уходит в журнал: консоли у службы нет, и это единственный след
 		// причины. Диспетчеру о неудаче сообщает сам winsvc.Run.
 		if err := winsvc.Run(serviceName, func(stop <-chan struct{}) error {
+			if installationGuardErr != nil {
+				return winsvc.Permanent(installationGuardErr)
+			}
 			return serve(*demoMode, stop)
 		}); err != nil {
 			log.Printf("служба остановлена с ошибкой: %v", err)
 			os.Exit(1)
 		}
 		return
-	}
-
-	// Запуск двойным щелчком без аргументов: спрашиваем, чего человек хочет.
-	// Через консоль с флагами вопросов не задаём — там намерение уже выражено.
-	if askOnStart(flag.NFlag(), ownsConsole(), dataExists()) {
-		switch askFirstRun() {
-		case choiceQuit:
-			return
-		case choiceDemo:
-			*demoMode = true
-		case choiceInstall:
-			runServiceCommand([]string{"-install"}, func() error { return installServer(firewallAsk) })
-			return
-		case choiceSetup:
-			// обычный запуск, ничего менять не надо
-		}
 	}
 
 	// Консольный запуск: останавливаемся по Ctrl+C.
@@ -462,6 +492,11 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 		IdleTimeout:    2 * time.Minute,
 		MaxHeaderBytes: 1 << 20,
 	}
+	if winsvc.IsService() {
+		if err := saveServerRuntime(installDir(), listenAddr); err != nil {
+			log.Printf("не удалось сохранить адрес службы для проверки установки: %v", err)
+		}
+	}
 	// Ошибка прослушивания приходит из горутины. Раньше она гасила процесс
 	// целиком: log.Fatalf — это os.Exit, при котором не закрывается база и
 	// теряется всё, что ingest не успел записать. Теперь она возвращается
@@ -654,6 +689,10 @@ func markStaleOffline(d *sql.DB) {
 // openBrowser пытается открыть URL в браузере по умолчанию.
 func openBrowser(url string) {
 	time.Sleep(700 * time.Millisecond)
+	_ = launchBrowser(url)
+}
+
+func launchBrowser(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -663,5 +702,8 @@ func openBrowser(url string) {
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
-	_ = cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }

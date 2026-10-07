@@ -14,7 +14,7 @@ const agentServiceName = "NetAdminAgent"
 var errInstallUnsupported = errors.New("установка службой доступна только в Windows: " +
 	"запустите агента средствами своей ОС, задав NETADMIN_SERVER_URL и NETADMIN_AGENT_TOKEN")
 
-func installAgent(string, string) error { return errInstallUnsupported }
-func uninstallAgent() error             { return errInstallUnsupported }
+func installAgent(string, string, bool, bool) error { return errInstallUnsupported }
+func uninstallAgent() error                         { return errInstallUnsupported }
 
 func startServiceLog() {}

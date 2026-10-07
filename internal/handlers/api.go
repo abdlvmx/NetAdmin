@@ -118,27 +118,40 @@ func (a *App) DevicesStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	rows, err := a.DB.Query(`SELECT id, status, COALESCE(last_seen,'') FROM devices`)
+	rows, err := a.DB.QueryContext(r.Context(), `SELECT id, COALESCE(status,'unknown'), COALESCE(last_seen,''),
+		COALESCE(status='offline' OR cpu_usage>=90 OR ram_usage>=90 OR disk_usage>=90
+			OR (last_seen IS NOT NULL AND last_seen < datetime('now','-10 minutes')),0),
+		(COALESCE(agent_token,'')<>'') FROM devices`)
 	if err != nil {
+		log.Printf("DevicesStatus: %v", err)
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 	type devStatus struct {
-		ID       int64  `json:"id"`
-		Status   string `json:"status"`
-		LastSeen string `json:"last_seen"`
+		ID           int64  `json:"id"`
+		Status       string `json:"status"`
+		LastSeen     string `json:"last_seen"`
+		LastSeenSort string `json:"last_seen_sort"`
+		Alert        bool   `json:"alert"`
+		HasAgent     bool   `json:"has_agent"`
 	}
 	list := []devStatus{}
-	var total, online, offline int
+	var total, online, offline, alerts int
 	for rows.Next() {
 		var d devStatus
 		var ls string
-		if rows.Scan(&d.ID, &d.Status, &ls) != nil {
-			continue
+		if err := rows.Scan(&d.ID, &d.Status, &ls, &d.Alert, &d.HasAgent); err != nil {
+			log.Printf("DevicesStatus: %v", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
 		}
 		d.LastSeen = tz.DateTime(ls)
+		d.LastSeenSort = ls
 		total++
+		if d.Alert {
+			alerts++
+		}
 		switch d.Status {
 		case "online":
 			online++
@@ -149,20 +162,22 @@ func (a *App) DevicesStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		log.Printf("DevicesStatus: %v", err)
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
 	}
-	var alerts int
-	a.DB.QueryRow(`SELECT COUNT(*) FROM devices
-		WHERE status='offline' OR cpu_usage>=90 OR ram_usage>=90 OR disk_usage>=90
-		   OR (last_seen IS NOT NULL AND last_seen < datetime('now','-10 minutes'))`).Scan(&alerts)
-	// Число проблем в сводке — чтобы дашборд заметил, что список «Требует
-	// внимания» устарел, и предложил обновить страницу. Перерисовать его сам он
-	// не может: список собирается на сервере, а перезагружать страницу под
-	// курсором у человека — последнее, чего от неё ждут.
-	issues := issuesTotal(a.issueGroups())
+	if err := rows.Close(); err != nil {
+		log.Printf("DevicesStatus: %v", err)
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	// Ревизия учитывает состав и содержание сводки: одна исчезнувшая проблема
+	// и одна новая меняют список даже при неизменном количестве.
+	issues := a.issueGroups()
 	writeJSON(w, map[string]any{
-		"devices": list,
+		"devices":         list,
+		"issues_revision": issuesRevision(issues),
 		"summary": map[string]int{"total": total, "online": online, "offline": offline,
-			"unknown": total - online - offline, "alerts": alerts, "issues": issues},
+			"unknown": total - online - offline, "alerts": alerts, "issues": issuesTotal(issues)},
 	})
 }
 

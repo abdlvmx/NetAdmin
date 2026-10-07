@@ -3,9 +3,11 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"netadmin/internal/agentbin"
+	"netadmin/internal/installtxn"
 	"netadmin/internal/instdir"
 	"netadmin/internal/tz"
 	"netadmin/internal/version"
@@ -64,48 +67,146 @@ func installServer(firewall firewallChoice) error {
 		return err
 	}
 	dst := serviceExePath()
-
-	if !samePath(src, dst) {
-		// Служба могла работать из целевого файла — подменить его на ходу
-		// Windows не даст, поэтому сначала останавливаем.
-		if err := winsvc.Stop(serviceName); err != nil {
-			return err
-		}
-		if err := copyFile(src, dst); err != nil {
-			return fmt.Errorf("копирование в %s: %w", dst, err)
+	prior, err := winsvc.State(serviceName)
+	if err != nil {
+		return err
+	}
+	dataSetting, err := winsvc.Environment(serviceName, "NETADMIN_DATA_DIR")
+	if err != nil {
+		return err
+	}
+	dataDir, err := serverDataDir(dir, dataSetting)
+	if err != nil {
+		return err
+	}
+	// A running upgraded service reports the environment it actually received
+	// from SCM. Refuse a changed registry path until that change is applied:
+	// guessing would snapshot the wrong database before candidate migration.
+	if prior == winsvc.StateRunning {
+		var live serverRuntime
+		if b, readErr := os.ReadFile(filepath.Join(dir, "server_runtime.json")); readErr == nil && json.Unmarshal(b, &live) == nil {
+			pid, pidErr := winsvc.ProcessID(serviceName)
+			if pidErr == nil && live.ProcessID == pid && live.DataDir != "" && !samePath(live.DataDir, dataDir) {
+				return fmt.Errorf("каталог данных работающей службы %s отличается от машинной настройки %s; сначала примените смену каталога и перезапустите службу, затем обновляйте", live.DataDir, dataDir)
+			}
 		}
 	}
-
-	if err := winsvc.Install(winsvc.Config{
+	if _, err := os.Stat(filepath.Join(dataDir, "netadmin.db.restore")); err == nil {
+		return fmt.Errorf("ожидается восстановление базы: сначала перезапустите установленный сервер или отмените восстановление в настройках, затем обновляйте")
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if _, err := installedServerHealthURL(dataDir); err != nil {
+		return err
+	}
+	service := winsvc.Config{
 		Name:        serviceName,
 		DisplayName: serviceDisplayName,
 		Description: serviceDescription,
 		Exe:         dst,
+	}
+	guard, err := json.Marshal(struct {
+		DataDir string `json:"data_dir"`
+	}{dataDir})
+	if err != nil {
+		return err
+	}
+	files := []installtxn.File{
+		{Path: filepath.Join(dir, serverInstallGuardName), Data: guard, Mode: 0o600},
+		{Path: filepath.Join(dir, "server_runtime.json"), Snapshot: true},
+	}
+	if !samePath(src, dst) {
+		files = append(files, installtxn.File{Path: dst, Source: src, Mode: 0o755})
+	}
+	// Startup can migrate the database and create settings even when binding
+	// the HTTP port later fails. Preserve the stopped SQLite files together.
+	for _, name := range []string{"netadmin.db", "netadmin.db-wal", "netadmin.db-shm", "config.json"} {
+		files = append(files, installtxn.File{Path: filepath.Join(dataDir, name), Snapshot: true})
+	}
+	fmt.Println("Подготавливаю установку; прежняя версия будет возвращена при ошибке запуска.")
+	var readyURL string
+	var restoreConfig func() error
+	captured := false
+	startAttempted := false
+	if err := installtxn.Apply(files, installtxn.Hooks{
+		Stop: func() error {
+			if !captured {
+				var err error
+				prior, err = winsvc.State(serviceName)
+				if err != nil {
+					return err
+				}
+				restoreConfig, err = winsvc.CaptureConfig(serviceName)
+				if err != nil {
+					return err
+				}
+				captured = true
+			}
+			return winsvc.Stop(serviceName)
+		},
+		Start: func() error {
+			startAttempted = true
+			return winsvc.Install(service)
+		},
+		Verify: func() error {
+			var err error
+			readyURL, err = waitInstalledServerHealth(dir, dataDir)
+			return err
+		},
+		Recover: func() error {
+			if !captured {
+				return nil
+			}
+			if prior == winsvc.StateNotInstalled {
+				if startAttempted {
+					return winsvc.Uninstall(serviceName)
+				}
+				return nil
+			}
+			if restoreConfig != nil {
+				if err := restoreConfig(); err != nil {
+					return err
+				}
+			}
+			if prior == winsvc.StateRunning {
+				return winsvc.Start(serviceName)
+			}
+			return nil
+		},
 	}); err != nil {
 		return err
 	}
+	if err := os.Remove(filepath.Join(dir, serverInstallGuardName)); err != nil {
+		log.Printf("уборка отметки завершённой установки: %v", err)
+	}
 
-	if err := writeShortcut(); err != nil {
+	panelURL := strings.TrimSuffix(readyURL, "healthz")
+	if err := writeShortcut(panelURL); err != nil {
 		log.Printf("ярлык на рабочем столе не создан: %v", err) // не повод считать установку неудачной
 	}
 
-	fmt.Println("Служба NetAdmin установлена и запущена.")
+	fmt.Println("Служба NetAdmin установлена; веб-интерфейс и база подтвердили готовность.")
 	fmt.Printf("  Версия:             %s\n", version.Full())
-	fmt.Printf("  Программа и данные: %s\n", dir)
+	fmt.Printf("  Программа:          %s\n", dir)
+	fmt.Printf("  База и настройки:   %s\n", dataDir)
 	if tightened {
 		fmt.Println("  Доступ к каталогу ограничен SYSTEM и администраторами (был открыт).")
 	}
 	fmt.Printf("  Журнал службы:      %s\n", logPath())
-	fmt.Println("  Веб-интерфейс:      http://127.0.0.1:8765")
+	fmt.Printf("  Веб-интерфейс:      %s\n", panelURL)
 	if agentbin.Available() {
 		fmt.Println("  Агент для рабочих станций уже внутри — загружать его не нужно.")
 	}
 	fmt.Println()
 
-	applyFirewall(firewall)
+	address, _ := url.Parse(panelURL) // verified URL contains a validated port
+	applyFirewall(firewall, address.Port())
 
 	fmt.Println()
 	fmt.Println("Состояние: netadmin.exe -status     Удалить: netadmin.exe -uninstall")
+	if ownsConsole() && os.Getenv("NETADMIN_NO_BROWSER") == "" {
+		openBrowser(panelURL)
+	}
 	return nil
 }
 
@@ -126,18 +227,16 @@ const (
 //
 // Параметры правила повторяют deploy/firewall_server.bat: канал не шифруется,
 // и открывать порт шире локального сегмента нельзя.
-func applyFirewall(choice firewallChoice) {
-	const port = "8765"
-
+func applyFirewall(choice firewallChoice, port string) {
 	open := choice == firewallYes
 	switch choice {
 	case firewallNo:
-		fmt.Println("Порт 8765 в брандмауэре не открыт — агенты с других машин не подключатся.")
+		fmt.Printf("Порт %s в брандмауэре не открыт — агенты с других машин не подключатся.\n", port)
 		fmt.Println("Открыть позже: netadmin.exe -install -firewall")
 		return
 	case firewallAsk:
 		fmt.Println("Чтобы агенты с других компьютеров достучались до сервера, нужно открыть")
-		fmt.Println("порт 8765 в брандмауэре Windows — только для частной сети и только для")
+		fmt.Printf("порт %s в брандмауэре Windows — только для частной сети и только для\n", port)
 		fmt.Println("вашей локальной подсети.")
 		open = askYesNo("Открыть порт 8765 сейчас?")
 	}
@@ -151,7 +250,7 @@ func applyFirewall(choice firewallChoice) {
 		fmt.Println("Откройте порт вручную скриптом deploy/firewall_server.bat")
 		return
 	}
-	fmt.Println("Правило «NetAdmin (LAN)» создано: TCP 8765, частная сеть, локальная подсеть.")
+	fmt.Printf("Правило «NetAdmin (LAN)» создано: TCP %s, частная сеть, локальная подсеть.\n", port)
 	if !privateProfileActive() {
 		fmt.Println()
 		fmt.Println("ВНИМАНИЕ: ни одно подключение не отнесено к «Частной сети», поэтому правило")
@@ -230,8 +329,8 @@ func shortcutPath() string {
 	return filepath.Join(pub, "Desktop", "NetAdmin.url")
 }
 
-func writeShortcut() error {
-	return os.WriteFile(shortcutPath(), []byte(shortcutBody(serviceExePath())), 0o644)
+func writeShortcut(url string) error {
+	return os.WriteFile(shortcutPath(), []byte(shortcutBodyForURL(serviceExePath(), url)), 0o644)
 }
 
 // shortcutBody — содержимое ярлыка.
@@ -241,8 +340,12 @@ func writeShortcut() error {
 // закладки. Берём его из установленного .exe — значок там уже есть
 // (см. cmd/icongen), класть рядом отдельный .ico не нужно.
 func shortcutBody(exe string) string {
+	return shortcutBodyForURL(exe, "http://127.0.0.1:8765/")
+}
+
+func shortcutBodyForURL(exe, url string) string {
 	return "[InternetShortcut]\r\n" +
-		"URL=http://127.0.0.1:8765/\r\n" +
+		"URL=" + url + "\r\n" +
 		"IconFile=" + exe + "\r\n" +
 		"IconIndex=0\r\n"
 }

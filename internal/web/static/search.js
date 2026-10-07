@@ -21,6 +21,8 @@
       c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     function open() {
+      // Поиск не должен перекрывать форму с собственным порядком фокуса.
+      if (document.querySelector('.modal-overlay.open')) return;
       box.classList.add('on');
       input.value = '';
       list.innerHTML = '';

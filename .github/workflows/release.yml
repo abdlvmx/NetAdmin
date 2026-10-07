@@ -27,7 +27,9 @@ jobs:
       - name: Проверки
         run: |
           go vet ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Сборка
         # Порядок важен: агент собирается первым и кладётся в
@@ -40,20 +42,26 @@ jobs:
         # значением по умолчанию из internal/version, и релиз v1.2.0 называл бы
         # себя предыдущей версией. Имя символа сверяет TestReleaseStampsVersion.
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $ver = "${{ github.ref_name }}" -replace '^v', ''
+          $ver = $env:RELEASE_TAG -replace '^v', ''
+          if ($ver -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+            throw "Некорректная версия релиза: $env:RELEASE_TAG"
+          }
           $ld = "-s -w -X netadmin/internal/version.Value=$ver"
           go build -trimpath -ldflags $ld -o internal/agentbin/bin/agent.exe ./cmd/agent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go build -trimpath -ldflags $ld -o dist/netadmin.exe ./cmd/netadmin
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item internal/agentbin/bin/agent.exe dist/agent.exe
 
-      - name: Контрольные суммы
+      - name: Комплект Windows и проверка архива
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          Get-ChildItem dist/*.exe | ForEach-Object {
-            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$h  $($_.Name)"
-          } | Out-File -FilePath dist/SHA256SUMS.txt -Encoding ascii
+          ./scripts/package-windows.ps1 -Version ($env:RELEASE_TAG -replace '^v', '')
 
       - name: Описание релиза
         shell: pwsh
@@ -61,23 +69,28 @@ jobs:
           @'
           ## Как запустить
 
-          1. Скачайте `netadmin.exe` из списка ниже.
-          2. Посмотреть без установки: `netadmin.exe -demo` — откроется браузер
-             с вымышленными данными. Сеть не сканируется, база временная.
-          3. Поставить по-настоящему: `netadmin.exe -install` из PowerShell
-             от имени администратора — сервер станет службой Windows.
-          4. Агент на рабочие станции ставится одной командой из PowerShell;
-             готовую строку показывает раздел «Настройки».
+          1. Скачайте **NetAdmin-Windows-x64.zip** из списка ниже.
+          2. Нажмите на ZIP правой кнопкой и выберите **«Извлечь всё»**.
+          3. Откройте **netadmin.exe** двойным щелчком. Мастер поможет посмотреть
+             демо, настроить сервер или подключить компьютер к готовому серверу.
 
-          Требуется Windows. Ничего доустанавливать не нужно: файл самодостаточный.
-          Контрольные суммы — в `SHA256SUMS.txt`.
+          Ничего доустанавливать не нужно. Инструкция **START-HERE.txt** находится
+          внутри комплекта. Для демо используйте `admin` / `Parol12345`;
+          сеть в этом режиме не сканируется, данные временные.
+
+          Для остальных компьютеров скачайте готовый агент в «Настройках» панели:
+          адрес и код подключения уже будут заполнены. Отдельные EXE оставлены
+          ниже для обновлений и автоматической установки.
+
+          Контрольные суммы ZIP и EXE — в отдельном `SHA256SUMS.txt`.
+          Данные установленного сервера сохраняются при обновлении.
           '@ | Out-File -FilePath notes.md -Encoding utf8
 
       - name: Публикация
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "${{ github.ref_name }}"
-          dist/netadmin.exe dist/agent.exe dist/SHA256SUMS.txt
-          --title "NetAdmin ${{ github.ref_name }}"
-          --notes-file notes.md
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: pwsh
+        run: |
+          gh release create $env:RELEASE_TAG dist/NetAdmin-Windows-x64.zip dist/netadmin.exe dist/agent.exe dist/SHA256SUMS.txt --title "NetAdmin $env:RELEASE_TAG" --notes-file notes.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

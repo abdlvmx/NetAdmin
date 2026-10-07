@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Начало работы — NetAdmin</title>
+<style nonce="{{.Token}}">
+:root{color-scheme:light dark;--bg:#f4f6fa;--card:#fff;--text:#182337;--muted:#536176;--line:#dce3ed;--accent:#2459db}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 "Segoe UI",system-ui,sans-serif}main{max-width:1080px;margin:0 auto;padding:48px 24px}header{margin-bottom:30px}.brand{display:flex;align-items:center;gap:12px;font-weight:700}.logo{background:var(--accent);color:white;border-radius:12px;padding:6px 13px;font-size:22px}.version{font-size:13px;color:var(--muted);font-weight:400;margin-left:auto}h1{font-size:clamp(27px,4vw,38px);line-height:1.2;letter-spacing:-.6px;margin:28px 0 12px}h2{font-size:21px;line-height:1.35;margin:14px 0 12px}p{margin:0 0 18px}.intro{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.card{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px}.card p{color:var(--muted)}.tag{color:var(--accent);font-size:13px;font-weight:600}.card form{margin-top:auto}button,summary{font:inherit;cursor:pointer}button{display:block;min-height:44px;width:100%;padding:11px 16px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);font-weight:600}button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button:hover{filter:brightness(.95)}button:disabled{cursor:default;opacity:.55}button:focus-visible,summary:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:4px}details{margin:12px 0 0}summary{color:var(--accent);font-weight:600}details p{font-size:14px;margin:12px 0}label{display:flex;gap:9px;align-items:flex-start;font-size:14px;margin:14px 0}input[type=checkbox]{width:18px;height:18px;flex-shrink:0;margin-top:4px;accent-color:var(--accent)}.note{font-size:14px;color:var(--muted);margin:24px 0}.quit{width:auto;background:transparent;font-weight:400}.result{max-width:650px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px}.result p{margin:0}footer{margin-top:28px;color:var(--muted);font-size:13px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.card{padding:22px}main{padding:28px 18px}.version{margin-left:0}.brand{flex-wrap:wrap}}
+@media(prefers-color-scheme:dark){:root{--bg:#101724;--card:#192336;--text:#eaf0fa;--muted:#aab8cc;--line:#2e3d53;--accent:#789fff}button.primary{color:#101724}}
+</style>
+</head>
+<body><main>
+<header><div class="brand"><span class="logo" aria-hidden="true">N</span><span>NetAdmin</span><span class="version">Версия {{.Version}}</span></div>
+{{if .Done}}<h1>Следующий шаг</h1>{{else}}<h1>С чего начнём?</h1><p class="intro">Выберите, что нужно сделать на этом компьютере. Настроить всё сразу не потребуется.</p>{{end}}</header>
+{{if .Done}}<section class="result" aria-live="polite"><p>{{.Message}}</p></section>
+{{else}}
+<div class="grid">
+<section class="card"><span class="tag">Познакомиться с приложением</span><h2>Посмотреть демо</h2><p>Откройте пример с вымышленными компьютерами, сотрудниками и заявками. Ваша сеть не сканируется.</p><form method="post" action="{{.Path}}"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" name="action" value="demo">Посмотреть демо</button></form></section>
+<section class="card"><span class="tag">Для администратора сети</span><h2>Настроить сервер</h2><p>Создайте панель управления компьютерами. Сервер нужен на одном компьютере, который будет доступен остальным.</p><form method="post" action="{{.Path}}"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" name="action" value="setup">Запустить сейчас</button><details><summary>Установить для постоянной работы</summary><p>Сервер будет запускаться вместе с Windows и работать после закрытия окна. Windows запросит права администратора.</p><label><input type="checkbox" name="lan" value="yes" checked><span>Разрешить подключение из локальной подсети в частной сети Windows</span></label><button name="action" value="install" {{if not .CanInstall}}disabled{{end}}>Установить для постоянной работы</button>{{if not .CanInstall}}<p>Установка службы доступна в Windows.</p>{{end}}</details></form></section>
+<section class="card"><span class="tag">Для компьютера сотрудника</span><h2>Подключить этот компьютер</h2><p>Если сервер уже есть, установите агент. Он передаёт состояние этого компьютера в панель администратора.</p><details><summary>Что понадобится?</summary><p>Попросите администратора прислать подготовленный агент. Или получите адрес сервера и код подключения: установка спросит их в отдельном окне.</p></details><form method="post" action="{{.Path}}"><input type="hidden" name="token" value="{{.Token}}"><button name="action" value="agent" {{if not .CanAgent}}disabled{{end}}>Открыть установку агента</button>{{if not .CanAgent}}<p>Нужен готовый комплект Windows или подготовленный файл агента от администратора.</p>{{end}}</form></section>
+</div>
+<p class="note">При запуске сейчас сервер и демо работают, пока окно NetAdmin открыто. Для постоянной работы выберите установку сервера.</p>
+<form method="post" action="{{.Path}}"><input type="hidden" name="token" value="{{.Token}}"><button class="quit" name="action" value="quit">Закрыть мастер</button></form>
+{{end}}
+<footer>Эта страница работает только на вашем компьютере. Выбор действия не отправляется во внешние сервисы.</footer>
+</main></body></html>

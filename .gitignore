@@ -7,6 +7,12 @@
 *.db-wal
 config.json
 agent_state.json
+agent_status.json
+agent_update.json
+agent_update_result.json
+server_runtime.json
+server_install_guard.json
+.netadmin-install.lock
 *.log
 *.pid
 

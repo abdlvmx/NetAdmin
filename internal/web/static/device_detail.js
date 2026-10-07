@@ -3,6 +3,28 @@
 const DD = document.getElementById('dd-root').dataset;
 const DEV_ID = Number(DD.id), DEV_IP = DD.ip, DEV_HOST = DD.host;
 const esc = s => (s||'').replace(/</g,'&lt;');
+const ddActionsMenu = document.getElementById('dd-actions-menu');
+function ddCloseActions(returnFocus){
+  if(!ddActionsMenu || !ddActionsMenu.open) return;
+  ddActionsMenu.open = false;
+  if(returnFocus) ddActionsMenu.querySelector('summary').focus();
+}
+if(ddActionsMenu){
+  // details открывается с клавиатуры; внутри остаётся обычная навигация по Tab.
+  ddActionsMenu.addEventListener('click', e=>{
+    if(e.target.closest('[data-act]')) ddCloseActions(true);
+  });
+  ddActionsMenu.addEventListener('submit', ()=>ddCloseActions(true));
+  document.addEventListener('click', e=>{
+    if(!ddActionsMenu.contains(e.target)) ddCloseActions(false);
+  });
+  document.addEventListener('keydown', e=>{
+    if(e.key==='Escape' && ddActionsMenu.open){ e.preventDefault(); ddCloseActions(true); }
+  });
+  ddActionsMenu.addEventListener('focusout', ()=>queueMicrotask(()=>{
+    if(!ddActionsMenu.contains(document.activeElement)) ddCloseActions(false);
+  }));
+}
 function loadingRow(cols){ return `<tr><td colspan="${cols}" class="loading-row"><span class="spinner"></span>Загрузка…</td></tr>`; }
 function ddFilter(searchId, bodyId, countId){
   const q = (document.getElementById(searchId).value || '').toLowerCase();

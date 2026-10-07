@@ -2,12 +2,17 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
+	"time"
 
 	"netadmin/internal/ingest"
 	"netadmin/internal/netaccess"
+	"netadmin/internal/version"
 	"netadmin/internal/web"
 )
 
@@ -47,6 +52,15 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /favicon.ico", web.Favicon())
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if a.DB == nil || a.DB.PingContext(ctx) != nil {
+			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("X-NetAdmin-Version", version.Value)
+		w.Header().Set("X-NetAdmin-PID", strconv.Itoa(os.Getpid()))
 		_, _ = w.Write([]byte("ok"))
 	})
 

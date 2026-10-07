@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"netadmin/internal/agentstatus"
 	"netadmin/internal/version"
 	"netadmin/internal/wincon"
 	"netadmin/internal/winsvc"
@@ -93,7 +94,16 @@ const maxRespBytes = 4 << 20
 // HTTP-клиент для связи с сервером. Только локальная сеть, обычный HTTP:
 // подлинность и целостность обмена обеспечивает HMAC-подпись, не транспорт.
 var httpClient = &http.Client{
-	Timeout: 10 * time.Second,
+	Timeout:   10 * time.Second,
+	Transport: directAgentTransport(),
+}
+
+// Agent traffic targets the configured LAN server. Console proxy variables
+// must not route signed heartbeat or package requests to an office proxy.
+func directAgentTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return t
 }
 
 func envOr(k, def string) string {
@@ -161,11 +171,8 @@ func loadState() agentState {
 	return s
 }
 
-func saveState(s agentState) {
-	if b, err := json.Marshal(s); err == nil {
-		// в файле лежит токен устройства (на Windows — под DPAPI)
-		_ = os.WriteFile(statePath(), b, 0o600)
-	}
+func saveState(s agentState) error {
+	return writeAgentState(statePath(), s)
 }
 
 func osName() string {
@@ -416,6 +423,9 @@ func main() {
 		return
 	}
 
+	if handled, code := runUpdateHelperCommand(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	loadSettings()
 
 	// Самодиагностика: печатает, что настроено, доходит ли до сервера и что
@@ -430,13 +440,19 @@ func main() {
 	install := flag.Bool("install", false,
 		"установить агента службой Windows (нужны права администратора)")
 	uninstall := flag.Bool("uninstall", false, "остановить и удалить службу агента")
+	setup := flag.Bool("setup", false, "открыть мастер установки агента")
+	transfer := flag.Bool("transfer", false, "перенести регистрацию на другой сервер с новым кодом")
+	keepRegistration := flag.Bool("keep-registration", false, "сохранить регистрацию при смене адреса прежнего сервера")
 	srv := flag.String("server", "", "адрес сервера, например http://192.168.1.10:8765")
 	tok := flag.String("token", "", "enrollment-токен со страницы «Настройки» сервера")
 	flag.Parse()
 
 	switch {
+	case *setup:
+		runInteractiveSetup()
+		return
 	case *install:
-		if err := installAgent(*srv, *tok); err != nil {
+		if err := installAgent(*srv, *tok, *transfer, *keepRegistration); err != nil {
 			fmt.Println("ОШИБКА:", err)
 			holdWindow()
 			os.Exit(1)
@@ -498,12 +514,22 @@ func run(stop <-chan struct{}) error {
 	}
 	var lastSent map[string]any
 	var lastHB time.Time
+	var lastStatus agentstatus.Status
 
 	for {
 		metrics := collectMetrics()
 		// адаптивный heartbeat: шлём при заметном изменении или не реже maxHeartbeat
 		if lastSent == nil || time.Since(lastHB) >= maxHeartbeat || bigChange(metrics, lastSent) {
 			status, body, err := post("/api/agent-heartbeat", metrics)
+			lastStatus.ServerURL, lastStatus.Version = serverURL, agentVersion
+			lastStatus.DeviceID, lastStatus.ProcessID = deviceID, os.Getpid()
+			lastStatus.AttemptAt = time.Now().UTC()
+			lastStatus.LastError = ""
+			if err != nil {
+				lastStatus.LastError = "нет связи с сервером: " + err.Error()
+			} else if status != http.StatusOK {
+				lastStatus.LastError = heartbeatRejection(status, body)
+			}
 			switch {
 			case err != nil:
 				rejects.reportOnce("net|"+err.Error(), "нет связи с сервером: "+err.Error())
@@ -523,18 +549,37 @@ func run(stop <-chan struct{}) error {
 					Token    string `json:"token"`
 					DeviceID int64  `json:"device_id"`
 				}
-				_ = json.Unmarshal(body, &resp)
+				if err := json.Unmarshal(body, &resp); err != nil {
+					lastStatus.LastError = "сервер вернул некорректный ответ регистрации"
+					log.Print(lastStatus.LastError)
+					break
+				}
 				if resp.Token != "" && resp.Token != deviceToken {
+					if resp.DeviceID <= 0 {
+						lastStatus.LastError = "сервер не выдал идентификатор устройства; регистрация не подтверждена"
+						break
+					}
 					deviceToken, deviceID = resp.Token, resp.DeviceID
 					st.DeviceToken = protectString(resp.Token) // DPAPI на Windows
 					st.DeviceID = resp.DeviceID
-					saveState(st)
-					clearEnrollToken() // общий токен больше не нужен этой машине
 					log.Println("получен персональный токен устройства")
 				}
-				rejects.clear() // связь есть — прошлые жалобы неактуальны
+				if deviceID <= 0 || deviceToken == "" {
+					lastStatus.LastError = "сервер не подтвердил персональную регистрацию устройства"
+					break
+				}
+				if err := saveState(st); err != nil {
+					lastStatus.LastError = "сервер принял данные, но регистрация не сохранена на диске; проверьте права и свободное место, затем регистрацию ПК на сервере"
+					log.Printf("сохранение регистрации: %v", err)
+					lastSent = nil // retry persistence on the next heartbeat
+					break
+				}
+				clearEnrollToken() // durable personal state exists before erasing enrollment
+				rejects.clear()    // связь есть — прошлые жалобы неактуальны
 				lastSent = metrics
 				lastHB = time.Now()
+				lastStatus.DeviceID = deviceID
+				lastStatus.HeartbeatAt = lastStatus.AttemptAt
 				log.Println("heartbeat:", metrics["hostname"], metrics["cpu"], metrics["ram"], metrics["disk"])
 			default:
 				// Прежде всё, кроме 401/409/200, проваливалось мимо switch без
@@ -545,7 +590,11 @@ func run(stop <-chan struct{}) error {
 				// heartbeat работает, а не принимается один лишь инвентарь.
 				rejects.report("heartbeat", status, string(body))
 			}
+			if err := agentstatus.Save(exeDir(), lastStatus); err != nil {
+				log.Printf("не удалось записать результат проверки подключения: %v", err)
+			}
 		}
+		flushUpdateResult()
 
 		if runtime.GOOS == "windows" {
 			// инвентарь ПО — раз в сутки
@@ -641,15 +690,15 @@ func pollTasks() {
 	}
 	for _, t := range resp.Tasks {
 		status, output, code := runTask(t.Kind, t.Payload)
+		if launched, err := launchPendingUpdate(t.ID); err != nil {
+			status, output, code = "failed", "запуск обновления: "+err.Error(), 1
+		} else if launched {
+			// Помощник отправит итог после нового heartbeat либо отката.
+			return
+		}
 		log.Printf("задача #%d (%s): %s", t.ID, t.Kind, status)
 		_, _, _ = post("/api/agent-tasks/result", map[string]any{
 			"id": t.ID, "status": status, "result": output, "exit_code": code,
 		})
-		// Самообновление завершается перезапуском, и только после отправки
-		// результата: иначе сервер не узнал бы, чем закончилась задача.
-		if restartPending {
-			restartIntoNewBinary()
-			return
-		}
 	}
 }

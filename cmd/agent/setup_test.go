@@ -181,3 +181,39 @@ func TestAskSetupAsksWhenOnlyServerKnown(t *testing.T) {
 		t.Error("адрес потерян")
 	}
 }
+
+func TestConfirmRegistrationChangeOffersPreserveAndTransfer(t *testing.T) {
+	for _, tc := range []struct {
+		input          string
+		transfer, keep bool
+		ok             bool
+	}{{"1\n", false, true, true}, {"2\n", true, false, true}, {"\n", false, false, false}, {"3\n", false, false, false}} {
+		t.Run(tc.input, func(t *testing.T) {
+			dir := t.TempDir()
+			writeInstallFixture(t, dir, agentConfig{ServerURL: "http://old:8765"}, agentState{DeviceID: 42, DeviceToken: "dpapi:opaque"})
+			out := withStdin(t, tc.input)
+			transfer, keep, ok := confirmRegistrationChange(dir, "new")
+			text := out()
+			if transfer != tc.transfer || keep != tc.keep || ok != tc.ok {
+				t.Fatalf("wrong choice result: transfer=%v keep=%v ok=%v", transfer, keep, ok)
+			}
+			if !strings.Contains(text, "сохранить регистрацию") || !strings.Contains(text, "другой сервер") {
+				t.Fatalf("choice must explain effect on registration:\n%s", text)
+			}
+			_, state, err := readInstallIdentity(dir)
+			if err != nil || state.DeviceID != 42 || state.DeviceToken != "dpapi:opaque" {
+				t.Fatalf("confirmation itself changed old identity: %+v %v", state, err)
+			}
+		})
+	}
+}
+
+func TestConfirmRegistrationChangeSameServerNeedsNoExtraPrompt(t *testing.T) {
+	dir := t.TempDir()
+	writeInstallFixture(t, dir, agentConfig{ServerURL: "http://SERVER:8765/"}, agentState{DeviceID: 42, DeviceToken: "dpapi:opaque"})
+	out := withStdin(t, "")
+	transfer, keep, ok := confirmRegistrationChange(dir, "server")
+	if transfer || keep || !ok || out() != "" {
+		t.Fatalf("reinstall must preserve identity without another question: transfer=%v keep=%v ok=%v", transfer, keep, ok)
+	}
+}

@@ -52,6 +52,11 @@ func (a *App) AgentTasksPoll(w http.ResponseWriter, r *http.Request) {
 				var t task
 				if rows.Scan(&t.ID, &t.Kind, &t.Payload) == nil {
 					tasks = append(tasks, t)
+					// An update stops this process. Later tasks must remain
+					// pending so the new (or restored) agent can collect them.
+					if t.Kind == "selfupdate" {
+						break
+					}
 				}
 			}
 			if err := rows.Err(); err != nil {

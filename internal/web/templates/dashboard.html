@@ -209,7 +209,7 @@
     <div class="card-header">
       <span class="card-title">Требует внимания</span>
       {{if .IssuesTotal}}<span class="issues-total">{{.IssuesTotal}}</span>{{end}}
-      <span class="issues-stale" id="issues-stale" data-base="{{.IssuesTotal}}" style="display:none">
+      <span class="issues-stale" id="issues-stale" data-base="{{.IssuesTotal}}" data-revision="{{.IssuesRevision}}" style="display:none">
         Список изменился — <a href="/dashboard">обновить</a></span>
       <span class="updated" id="dash-updated" title="Когда страница последний раз получала данные"></span>
     </div>
