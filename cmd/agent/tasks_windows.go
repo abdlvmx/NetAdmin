@@ -3,23 +3,21 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
 	"golang.org/x/sys/windows"
 )
 
-// runTask выполняет удалённую задачу и возвращает статус (done|failed), вывод и код.
-// Фаза 1: питание (reboot/shutdown/logoff). Прочие виды добавляются позже.
-func runTask(kind, payload string) (status, output string, code int) {
+// runPlatformTask выполняет разрешённое действие с общим сроком и отменой.
+func runPlatformTask(ctx context.Context, kind, payload string) (status, output string, code int) {
 	switch kind {
 	case "reboot":
-		return runShutdown("/r")
+		return runShutdownContext(ctx, "/r")
 	case "shutdown":
-		return runShutdown("/s")
+		return runShutdownContext(ctx, "/s")
 	case "logoff":
 		out, err := logoffActiveSession()
 		if err != nil {
@@ -27,13 +25,13 @@ func runTask(kind, payload string) (status, output string, code int) {
 		}
 		return "done", out, 0
 	case "command":
-		return runLibraryCommand(payload)
+		return runLibraryCommandContext(ctx, payload)
 	case "install":
-		return installPackage(payload)
+		return installPackageContext(ctx, payload)
 	case "check":
-		return runSelfCheck()
+		return runSelfCheckContext(ctx)
 	case "selfupdate":
-		return selfUpdate(payload)
+		return selfUpdateContext(ctx, payload)
 	default:
 		return "failed", "неизвестная задача: " + kind, 1
 	}
@@ -47,41 +45,37 @@ func runTask(kind, payload string) (status, output string, code int) {
 // получается ровно тем, что увидел бы человек, запустивший agent.exe -check
 // руками: одна проверка, а не две расходящиеся.
 //
-// Ненулевой код — это найденные проблемы, а не сорванная задача: диагностика
-// отработала и ответила. Он возвращается как есть, чтобы на сервере было видно,
-// чем она кончилась.
+// Ненулевой код и подробный отчёт сохраняются, чтобы найденные проблемы были
+// видны в истории действий. Проверка ограничена временем и может быть отменена.
 func runSelfCheck() (string, string, int) {
+	ctx, cancel := context.WithTimeout(context.Background(), taskTimeout("check", ""))
+	defer cancel()
+	return runSelfCheckContext(ctx)
+}
+
+func runSelfCheckContext(ctx context.Context) (string, string, int) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "failed", "не удалось определить путь к агенту: " + err.Error(), 1
 	}
 	cmd := exec.Command(exe, "-check")
-	hideWindow(cmd)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	err = cmd.Run()
-	code := 0
-	if ee, ok := err.(*exec.ExitError); ok {
-		code = ee.ExitCode()
-	} else if err != nil {
-		return "failed", "самодиагностика не запустилась: " + err.Error(), 1
-	}
-	return "done", strings.TrimSpace(out.String()), code
+	out := runProcess(ctx, cmd)
+	return out.Status, out.Output, out.ExitCode
 }
 
 // runShutdown планирует перезагрузку (/r) или выключение (/s) с предупреждением
-// пользователю за 30 секунд (без принудительного закрытия приложений).
+// пользователю за 30 секунд. Windows подразумевает /f при положительном /t.
 func runShutdown(flag string) (string, string, int) {
+	ctx, cancel := context.WithTimeout(context.Background(), taskTimeout("shutdown", ""))
+	defer cancel()
+	return runShutdownContext(ctx, flag)
+}
+
+func runShutdownContext(ctx context.Context, flag string) (string, string, int) {
 	cmd := exec.Command("shutdown", flag, "/t", "30", "/c", "Действие администратора через NetAdmin")
-	hideWindow(cmd)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Run(); err != nil {
-		code := 1
-		if ee, ok := err.(*exec.ExitError); ok {
-			code = ee.ExitCode()
-		}
-		return "failed", out.String() + " " + err.Error(), code
+	out := runProcess(ctx, cmd)
+	if out.Status != "done" {
+		return out.Status, out.Output, out.ExitCode
 	}
 	return "done", "запланировано (через 30 с)", 0
 }
@@ -100,10 +94,10 @@ func logoffActiveSession() (string, error) {
 	if uint32(sid) == 0xFFFFFFFF {
 		return "", fmt.Errorf("нет активной консольной сессии")
 	}
-	// WTSLogoffSession(WTS_CURRENT_SERVER_HANDLE=0, SessionId, bWait=TRUE)
-	r, _, err := procLogoffSession.Call(0, sid, 1)
+	// Do not block the task worker waiting for applications in the user session.
+	r, _, err := procLogoffSession.Call(0, sid, 0)
 	if r == 0 {
 		return "", err
 	}
-	return "сессия пользователя завершена", nil
+	return "запрошено завершение сессии пользователя", nil
 }

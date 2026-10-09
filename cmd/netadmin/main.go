@@ -23,6 +23,7 @@ import (
 	"netadmin/internal/config"
 	"netadmin/internal/db"
 	"netadmin/internal/demo"
+	"netadmin/internal/edition"
 	"netadmin/internal/handlers"
 	"netadmin/internal/ingest"
 	"netadmin/internal/netaccess"
@@ -50,15 +51,25 @@ func main() {
 		"при установке не трогать брандмауэр")
 	showVersion := flag.Bool("version", false,
 		"показать версию сборки и выйти")
+	showEdition := flag.Bool("edition", false, "показать редакцию сборки и выйти")
+	showAgentEdition := flag.Bool("embedded-agent-edition", false, "показать редакцию встроенного агента и выйти")
 	resetPw := flag.Bool("reset-password", false,
 		"задать новый пароль администратору, потерявшему доступ (спросит, кому)")
 	resetUser := flag.String("user", "",
 		"для -reset-password: чей пароль менять, если администраторов несколько")
 	welcome := flag.Bool("welcome", false, "открыть понятный мастер запуска в браузере")
 	flag.Parse()
+	if *showEdition {
+		fmt.Println(edition.ID)
+		return
+	}
+	if *showAgentEdition {
+		fmt.Println(agentbin.EmbeddedEdition())
+		return
+	}
 	// Version inspection must not generate settings beside the downloaded EXE.
 	if *showVersion {
-		fmt.Println("NetAdmin " + version.Full())
+		fmt.Println(edition.Name + " " + version.Full())
 		return
 	}
 	if *welcome && (flag.NFlag() != 1 || flag.NArg() != 0) {
@@ -104,7 +115,7 @@ func main() {
 	// местное время с жалобой честнее, чем чужое молча.
 	if installationGuardErr == nil && !*install && !*uninstall && !*restart {
 		zone := ""
-		if !*demoMode {
+		if !*demoMode && config.ValidateFile() == nil {
 			zone = config.Load().Timezone
 		}
 		if err := tz.Set(zone); err != nil {
@@ -286,6 +297,9 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 		os.Setenv("NETADMIN_DATA_DIR", dir)
 		web.SetDemo(true)
 	}
+	if err := config.ValidateFile(); err != nil {
+		return winsvc.Permanent(fmt.Errorf("настройки сервера: %w; запуск отменён до изменения базы", err))
+	}
 
 	// Подготовленное восстановление применяется здесь — до открытия базы:
 	// подменить файл работающей базы нельзя (см. internal/backup).
@@ -348,6 +362,18 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 	// затем умолчание (локальные и частные сети). Служба окружение консоли не
 	// наследует, поэтому одной переменной было мало.
 	cfg := config.Load()
+	transport, err := cfg.TLSSettingsAt(config.DataDir(), true)
+	if demoMode {
+		transport = config.TLSSettings{}
+		err = nil
+	}
+	if err != nil {
+		return winsvc.Permanent(fmt.Errorf("настройка HTTPS: %w", err))
+	}
+	tlsConfig, err := transport.Load()
+	if err != nil {
+		return winsvc.Permanent(fmt.Errorf("запуск HTTPS: %w", err))
+	}
 	allowSet := cfg.AllowSubnetsSetting()
 	allow, err := netaccess.Parse(allowSet.Value)
 	if err != nil {
@@ -373,6 +399,11 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 		// сервер из консоли закрывается вместе с окном.
 		IsService: winsvc.IsService(),
 	}
+	closeEvents, err := app.StartEvents(config.DataDir())
+	if err != nil {
+		return winsvc.Permanent(fmt.Errorf("хранилище Events: %w", err))
+	}
+	defer closeEvents()
 
 	// Фоновая работа. В демо она вся отключена, а вместо неё вымышленный парк
 	// держится «живым»: тот, кто просто смотрит продукт, не должен получить от
@@ -446,11 +477,15 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 	if e != nil {
 		port = "8765"
 	}
+	panelURL := "http://127.0.0.1:" + port
+	if transport.Enabled() {
+		panelURL = transport.PublicURL
+	}
 
 	// Браузер открываем только при запуске из консоли: у службы нет рабочего
 	// стола, и rundll32 от имени SYSTEM ничего не показал бы никому.
 	if os.Getenv("NETADMIN_NO_BROWSER") == "" && !winsvc.IsService() {
-		go openBrowser("http://127.0.0.1:" + port)
+		go openBrowser(panelURL)
 	}
 
 	// Служба пишет в файл журнала, человек за консолью — читает приветствие.
@@ -458,17 +493,21 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 	// выглядел как отладочный вывод, и даже то, что окно закрывать нельзя,
 	// приходилось угадывать.
 	if winsvc.IsService() {
-		log.Printf("NetAdmin слушает %s (UI: http://127.0.0.1:%s)", listenAddr, port)
+		log.Printf("NetAdmin слушает %s (UI: %s)", listenAddr, panelURL)
 		log.Printf("Доступ разрешён с адресов: %s (источник: %s)", allow, allowSet.Source)
-		if allow.Unrestricted() {
+		if allow.Unrestricted() && !transport.Enabled() {
 			log.Print("ВНИМАНИЕ: ограничение по подсетям снято, сервер обслуживает " +
 				"любые адреса. Канал не шифруется, используйте только в доверенной сети.")
 		}
-		logReachableAddrs(port)
+		if transport.Enabled() {
+			log.Printf("Агентам: %s (сертификат должен быть доверен на каждом ПК)", panelURL)
+		} else {
+			logReachableAddrs(port)
+		}
 	} else if demoMode {
 		printDemoBanner(port)
 	} else {
-		printServerBanner(port, allow, allowSet.Source)
+		printServerBannerForURL(port, allow, allowSet.Source, panelURL, transport.Enabled())
 	}
 
 	warnStaleAgent()
@@ -480,8 +519,9 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 	}
 
 	srv := &http.Server{
-		Addr:    listenAddr,
-		Handler: app.Routes(),
+		TLSConfig: tlsConfig,
+		Addr:      listenAddr,
+		Handler:   app.Routes(),
 		// ReadHeaderTimeout — основная защита от медленных соединений: без него
 		// клиент, тянущий заголовки по байту, занимает воркер бесконечно.
 		ReadHeaderTimeout: 15 * time.Second,
@@ -493,7 +533,7 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 		MaxHeaderBytes: 1 << 20,
 	}
 	if winsvc.IsService() {
-		if err := saveServerRuntime(installDir(), listenAddr); err != nil {
+		if err := saveServerRuntime(installDir(), listenAddr, transport); err != nil {
 			log.Printf("не удалось сохранить адрес службы для проверки установки: %v", err)
 		}
 	}
@@ -503,7 +543,13 @@ func serve(demoMode bool, stop <-chan struct{}) error {
 	// наверх обычным путём, через остановку.
 	failed := make(chan error, 1)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if transport.Enabled() {
+			err = srv.ListenAndServeTLS("", "")
+		} else {
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			failed <- fmt.Errorf("не удалось занять адрес %s: %w.\n"+
 				"Порт занят другой программой или другой копией NetAdmin. Освободите его "+
 				"или задайте другой адрес: listen_addr в config.json.", listenAddr, err)

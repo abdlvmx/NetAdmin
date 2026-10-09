@@ -125,8 +125,7 @@ func TestDeployAgentUpdateRejectsUnsuitablePackage(t *testing.T) {
 // Годная сборка ставится в очередь всем машинам с агентом.
 func TestDeployAgentUpdateEnqueuesForAllAgents(t *testing.T) {
 	app := newTestApp(t)
-	app.DB.Exec(`INSERT INTO packages (id, name, kind, filename, sha256)
-		VALUES (1,'NetAdmin agent 1.1.0','exe','a.exe','deadbeef')`)
+	addAgentBuild(t, app, "agent.exe", "matching-edition-fixture", "deadbeef")
 	app.DB.Exec(`INSERT INTO devices (hostname, status, agent_token) VALUES ('WS-1','online','T1')`)
 	app.DB.Exec(`INSERT INTO devices (hostname, status, agent_token) VALUES ('WS-2','online','T2')`)
 	app.DB.Exec(`INSERT INTO devices (hostname, status) VALUES ('no-agent','online')`)

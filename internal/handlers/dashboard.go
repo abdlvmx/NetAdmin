@@ -94,6 +94,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 	s.DevicesOnlinePct = pct(s.DevicesOnline, s.DevicesTotal)
 
 	issues := a.issueGroups()
+	issues = append(issues, a.eventsIssueGroups(r)...)
 	data := dashData{
 		User:           user,
 		Active:         "dashboard",

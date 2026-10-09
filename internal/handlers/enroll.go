@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"netadmin/internal/agentbin"
+	"netadmin/internal/edition"
 )
 
 // Установка агента одной командой.
@@ -54,7 +55,11 @@ func (a *App) latestAgentBuild() (agentBuild, bool) {
 	if err == nil && b.Stored != "" && b.SHA256 != "" {
 		switch _, statErr := os.Stat(filepath.Join(packagesDir(), b.Stored)); {
 		case statErr == nil:
-			return b, true
+			id, editionErr := readAgentEdition(filepath.Join(packagesDir(), b.Stored))
+			if editionErr == nil && id == edition.ID {
+				return b, true
+			}
+			log.Printf("загруженная сборка агента не соответствует редакции сервера; используется встроенная")
 		case !errors.Is(statErr, fs.ErrNotExist):
 			// Файл на месте, но недоступен. Молча подсунуть встроенную сборку
 			// значит отдать машинам не ту версию, которую администратор выложил
@@ -73,6 +78,8 @@ func (a *App) latestAgentBuild() (agentBuild, bool) {
 // только при сборке релиза), а порядок «загруженная важнее встроенной» —
 // логика, от которой зависит, какую версию получат новые машины.
 var agentEmbedded = agentbin.Bytes
+
+var readAgentEdition = edition.ReadBinary
 
 // agentBuildMatch — сверка встроенной сборки агента с самим сервером. Вынесена
 // переменной по той же причине, что и agentEmbedded: в тестовом окружении

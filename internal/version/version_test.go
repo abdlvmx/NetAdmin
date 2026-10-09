@@ -49,30 +49,39 @@ func TestReleaseStampsVersion(t *testing.T) {
 		t.Skipf("release.yml не найден: %v", err)
 	}
 	yml := string(b)
+	b, err = os.ReadFile("../../scripts/build-windows.ps1")
+	if err != nil {
+		t.Fatalf("Windows build helper не найден: %v", err)
+	}
+	helper := string(b)
+	if !strings.Contains(yml, "$ver = $env:RELEASE_TAG -replace '^v', ''") ||
+		!strings.Contains(yml, "./scripts/build-windows.ps1 -Version $ver -Edition all") {
+		t.Fatal("release.yml должен передавать версию из тега сборщику обеих редакций")
+	}
 
 	// Полный путь символа: при переименовании пакета ключ -X молча перестаёт
 	// что-либо задавать — линковщик о промахе не сообщает.
 	const symbol = "-X netadmin/internal/version.Value="
-	if !strings.Contains(yml, symbol) {
-		t.Fatalf("в release.yml нет %q — релиз уйдёт с версией по умолчанию (%s)",
+	if !strings.Contains(helper, symbol+"$Version") {
+		t.Fatalf("в build-windows.ps1 нет %q с переданной версией — релиз уйдёт с версией по умолчанию (%s)",
 			symbol, Value)
 	}
 
 	// Оба бинарника собираются с одними ключами: разошедшись, сервер и агент
 	// стали бы называть разные версии одной и той же сборки.
 	for _, cmd := range []string{"./cmd/agent", "./cmd/netadmin"} {
-		line := buildLine(yml, cmd)
+		line := buildLine(helper, cmd)
 		if line == "" {
-			t.Errorf("в release.yml не найдена сборка %s", cmd)
+			t.Errorf("в build-windows.ps1 не найдена сборка %s", cmd)
 			continue
 		}
-		if !strings.Contains(line, "-ldflags") {
+		if !strings.Contains(line, "-ldflags $linkerFlags") {
 			t.Errorf("сборка %s идёт без -ldflags: %s", cmd, strings.TrimSpace(line))
 		}
 	}
 }
 
-// buildLine — строка рабочего процесса, собирающая указанный пакет.
+// buildLine — строка helper, собирающая указанный пакет.
 func buildLine(yml, pkg string) string {
 	for _, l := range strings.Split(yml, "\n") {
 		if strings.Contains(l, "go build") && strings.Contains(l, pkg) {

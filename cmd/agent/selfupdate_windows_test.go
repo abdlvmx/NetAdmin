@@ -12,9 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"netadmin/internal/edition"
 )
 
 func TestAgentUpdateConfirmsNewServiceBeforeCommit(t *testing.T) {
@@ -209,6 +212,50 @@ func TestAgentUpdateHashValidation(t *testing.T) {
 	}
 	if validUpdateHash(strings.Repeat("z", 64)) || validUpdateHash("") || verifyUpdateFile(p, strings.Repeat("0", 64)) == nil {
 		t.Fatal("invalid digest accepted")
+	}
+}
+
+func TestAgentUpdateEditionGuardAcceptsCurrentAndRejectsUnknown(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyUpdateEdition(exe); err != nil {
+		t.Fatalf("matching Go binary rejected: %v", err)
+	}
+	unknown := filepath.Join(t.TempDir(), "agent.exe.new")
+	if err := os.WriteFile(unknown, []byte("unknown executable"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyUpdateEdition(unknown); err == nil {
+		t.Fatal("unknown edition accepted")
+	}
+}
+
+func TestAgentUpdateEditionGuardRejectsRealOppositeEdition(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "candidate.go")
+	if err := os.WriteFile(source, []byte("package main\nfunc main() { println(\"1.1.0\") }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opposite, tags := "events", "securityevents"
+	if edition.Events {
+		opposite, tags = "standard", ""
+	}
+	candidate := filepath.Join(dir, "agent.exe.new")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "build", "-tags", tags, "-o", candidate, source)
+	cmd.Env = append(os.Environ(), "GOOS=windows", "GOARCH="+runtime.GOARCH)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build opposite-edition fixture: %v\n%s", err, output)
+	}
+	actual, err := edition.ReadBinary(candidate)
+	if err != nil || actual != opposite {
+		t.Fatalf("fixture edition=%q want=%q: %v", actual, opposite, err)
+	}
+	if err := verifyUpdateEdition(candidate); err == nil || !strings.Contains(err.Error(), "отличается") {
+		t.Fatalf("opposite edition not rejected: %v", err)
 	}
 }
 

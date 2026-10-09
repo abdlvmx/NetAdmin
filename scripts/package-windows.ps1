@@ -1,34 +1,43 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')]
     [string] $Version,
+
+    [ValidateSet('standard', 'events')]
+    [string] $Edition = 'standard',
 
     [string] $DistDir = (Join-Path $PSScriptRoot '..\dist'),
     [string] $InstructionPath = (Join-Path $PSScriptRoot '..\docs\windows-first-start.txt')
 )
 
 $ErrorActionPreference = 'Stop'
+# The old default command (-Version only) still packages standard. Prefer the
+# helper's edition directory, retaining compatibility with the old flat dist.
+if (-not $PSBoundParameters.ContainsKey('DistDir')) {
+    $editionDir = Join-Path $DistDir $Edition
+    if ($Edition -eq 'events' -or (Test-Path -LiteralPath $editionDir -PathType Container)) {
+        $DistDir = $editionDir
+    }
+}
 $distPath = (Resolve-Path -LiteralPath $DistDir).ProviderPath
 $instruction = (Resolve-Path -LiteralPath $InstructionPath).ProviderPath
 $binaryNames = @('netadmin.exe', 'agent.exe')
-$archiveName = 'NetAdmin-Windows-x64.zip'
+$archiveName = if ($Edition -eq 'events') { 'NetAdmin-Events-Windows-x64.zip' } else { 'NetAdmin-Windows-x64.zip' }
+$productName = if ($Edition -eq 'events') { 'NetAdmin Events' } else { 'NetAdmin' }
 
-# Probe the files actually being shipped. A failed build or missing version stamp
-# must not produce a package with a misleading release number.
-foreach ($name in $binaryNames) {
-    $binaryPath = Join-Path $distPath $name
-    if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
-        throw "Missing release binary: $binaryPath"
-    }
+function Invoke-BinaryProbe([string] $BinaryPath, [string] $Argument) {
+    $name = [System.IO.Path]::GetFileName($BinaryPath)
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $binaryPath
-    $startInfo.Arguments = '-version'
+    $startInfo.FileName = $BinaryPath
+    $startInfo.Arguments = $Argument
     $startInfo.WorkingDirectory = $distPath
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $startInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $startInfo
     try {
@@ -37,20 +46,55 @@ foreach ($name in $binaryNames) {
         $stderr = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit(10000)) {
             $process.Kill()
-            throw "Version probe timed out: $name"
+            $process.WaitForExit()
+            throw "Binary probe timed out: $name $Argument"
         }
         $output = $stdout.GetAwaiter().GetResult().Trim()
         $errorOutput = $stderr.GetAwaiter().GetResult().Trim()
         if ($process.ExitCode -ne 0) {
-            throw "Version probe failed: $name ($errorOutput)"
+            throw "Binary probe failed: $name $Argument (exit $($process.ExitCode), $errorOutput)"
         }
-        if ($output.Length -gt 1024 -or $output -notmatch ('(^|\s)' + [regex]::Escape($Version) + '(\s|$)')) {
-            throw "Wrong release version in ${name}: expected $Version, got $output"
+        if ($output.Length -gt 1024 -or $output.Contains("`n") -or $output.Contains("`r")) {
+            throw "Invalid binary probe output: $name $Argument"
         }
-        Write-Host "$name : $output"
+        return $output
     } finally {
         $process.Dispose()
     }
+}
+
+# Probe the exact files being shipped before touching an existing archive.
+# Server and standalone agent must agree, including the embedded agent edition.
+$releaseVersion = $null
+foreach ($name in $binaryNames) {
+    $binaryPath = Join-Path $distPath $name
+    if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
+        throw "Missing release binary: $binaryPath"
+    }
+    $binaryEdition = Invoke-BinaryProbe $binaryPath '-edition'
+    if ($binaryEdition -cne $Edition) {
+        throw "Wrong edition in ${name}: expected $Edition, got $binaryEdition"
+    }
+    $output = Invoke-BinaryProbe $binaryPath '-version'
+    if ($name -eq 'agent.exe') {
+        # The agent's -version is a numeric wire contract for self-update.
+        # Its separate build probe includes edition and Git metadata.
+        if ($output -cne $Version) {
+            throw "Wrong release version in ${name}: expected $Version, got $output"
+        }
+        $output = Invoke-BinaryProbe $binaryPath '-build-version'
+    }
+    $versionPrefix = [regex]::Escape("$productName $Version")
+    if ($output -cnotmatch ("^$versionPrefix(?: · [0-9a-fA-F]+(?: \(с правками\))?)?$") -or
+        ($null -ne $releaseVersion -and $output -cne $releaseVersion)) {
+        throw "Wrong or inconsistent release version in ${name}: expected $productName $Version, got $output"
+    }
+    $releaseVersion = $output
+    Write-Host "$name : $output ($binaryEdition)"
+}
+$embeddedEdition = Invoke-BinaryProbe (Join-Path $distPath 'netadmin.exe') '-embedded-agent-edition'
+if ($embeddedEdition -cne $Edition) {
+    throw "Wrong embedded agent edition: expected $Edition, got $embeddedEdition"
 }
 
 $nonce = [guid]::NewGuid().ToString('N')
@@ -72,7 +116,31 @@ try {
     [System.IO.File]::WriteAllLines((Join-Path $packageDir 'SHA256SUMS.txt'), $checksumLines, [System.Text.Encoding]::ASCII)
     # A BOM makes the Russian instructions readable in older Windows Notepad.
     $utf8Bom = New-Object System.Text.UTF8Encoding($true)
-    [System.IO.File]::WriteAllText((Join-Path $packageDir 'START-HERE.txt'), [System.IO.File]::ReadAllText($instruction), $utf8Bom)
+    $startText = [System.IO.File]::ReadAllText($instruction)
+    if ($Edition -eq 'events') {
+        $eventsIntro = @'
+NetAdmin Events — редакция с событиями Windows
+============================================
+Сервер, встроенный агент и agent.exe в этом комплекте относятся к Events.
+Сбор событий выключен по умолчанию. Настройте HTTPS и явно включите сбор
+для выбранных ПК в разделе «События Windows» → «Сбор». Для смены редакции агента
+нужна переустановка; обычное самообновление редакцию не меняет.
+По новым событиям создаются карточки: серии неудачных входов, очистка журнала
+и установка службы. Откройте карточку, проверьте события, назначьте
+ответственного и сохраните разбор. Пороги и временные исключения находятся
+в разделе «Настройки» → «Правила и исключения». Доступ — только администраторам.
+Основные разделы Events: «Обнаружения», «Журнал», «Сбор» и «Настройки».
+В разделе «Сбор» видны потеря связи, ошибки сбора и задержка очереди.
+Копии Events создаются отдельно в подкаталоге events общего каталога копий,
+по тому же расписанию. Создание, проверка и восстановление доступны в
+«Настройки» → «Резервные копии» внутри Events. После восстановления перезапустите сервер и включите сбор
+для нужных ПК заново; прежняя база сохраняется рядом для отката.
+Описание и ограничения: https://github.com/abdlvmx/NetAdmin/blob/main/docs/events.md
+
+'@
+        $startText = $eventsIntro + "`r`n" + $startText
+    }
+    [System.IO.File]::WriteAllText((Join-Path $packageDir 'START-HERE.txt'), $startText, $utf8Bom)
 
     $memberNames = @('netadmin.exe', 'agent.exe', 'START-HERE.txt', 'SHA256SUMS.txt')
     $packageFiles = @($memberNames | ForEach-Object { Join-Path $packageDir $_ })

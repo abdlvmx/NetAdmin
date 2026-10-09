@@ -1,0 +1,24 @@
+{{define "title"}}Карточка обнаружения{{end}}
+{{define "extra_head"}}<style>
+.finding-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px}.finding-form{display:grid;gap:12px;max-width:640px}.finding-form label{display:grid;gap:5px}.finding-fields{display:grid;gap:6px;overflow-wrap:anywhere;white-space:normal;max-width:600px}.finding-json{white-space:pre-wrap;overflow-wrap:anywhere;max-width:750px;font-size:11px}.finding-note{white-space:pre-wrap;overflow-wrap:anywhere}.finding-summary{overflow-wrap:anywhere}
+.finding-topbar{flex-wrap:wrap}.finding-topbar>div{min-width:0;overflow-wrap:anywhere}.finding-grid>div,.finding-form>label{min-width:0}
+</style>{{end}}
+{{define "content"}}
+<div class="topbar finding-topbar"><div><h1>{{.Finding.Title}}</h1><div class="sub">Карточка № {{.Finding.ID}} · {{.Finding.Hostname}}</div></div><a class="btn btn-ghost" href="/events">К списку обнаружений</a></div>
+<div class="content">
+<section class="card"><div class="card-header"><h2 class="card-title">{{.Finding.StateLabel}}</h2><span class="badge {{if eq .Finding.Severity "high"}}badge-red{{else if eq .Finding.Severity "medium"}}badge-yellow{{else}}badge-gray{{end}}">{{.Finding.SeverityLabel}}</span></div>
+<p class="finding-summary">{{.Finding.Summary}}</p><div class="finding-grid"><div><b>Событий: {{.Finding.EventCount}}</b><p>Первое: {{dateTime .Finding.FirstEvent}}<br>Последнее: {{dateTime .Finding.LastEvent}}</p></div><div>Ответственный: {{.Finding.AssigneeName}}<p>Параметры при создании: порог {{.Finding.Threshold}}, интервал {{.Finding.WindowMinutes}} мин.</p></div></div>
+<p class="text-muted">Это повод для проверки. Сверьте событие с установкой ПО и действиями администратора. В карточке сохраняется до 50 подтверждающих событий; общее количество показано выше.</p></section>
+<section class="card" style="margin-top:18px"><h2 class="card-title">Разбор обнаружения</h2>
+{{if .Demo}}<p>Изменения недоступны в демо.</p>{{end}}
+<form id="finding-update" method="post" action="/events/findings/{{.Finding.ID}}" class="finding-form">
+<input type="hidden" name="revision" value="{{.Finding.Revision}}"><label>Состояние<select name="status"><option value="new" {{if eq .Finding.Status "new"}}selected{{end}}>Новое</option><option value="in_progress" {{if eq .Finding.Status "in_progress"}}selected{{end}}>Разбирается</option><option value="closed" {{if eq .Finding.Status "closed"}}selected{{end}}>Закрыто</option><option value="false_positive" {{if eq .Finding.Status "false_positive"}}selected{{end}}>Ложное срабатывание</option></select></label>
+<label>Ответственный<select name="assignee"><option value="0">Не назначен</option>{{range .Admins}}<option value="{{.ID}}" {{if eq $.Finding.AssigneeID .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+<label>Комментарий<textarea name="comment" rows="4" maxlength="2000" placeholder="Что проверено и какой результат"></textarea></label><button class="btn btn-primary" {{if .Demo}}disabled{{end}}>Сохранить разбор</button></form>
+<p class="text-muted">Отметка «Ложное срабатывание» завершает эту карточку. Для временного исключения будущих сигналов <a href="/events?tab=rules#rule-{{.Finding.RuleID}}">настройте исключение правила</a>. После закрытия серия входов должна заново набрать порог на новых событиях.</p>
+<div style="margin-top:20px">{{range .Comments}}<article style="border-top:1px solid var(--border);padding:12px 0"><b>{{.Author}}</b> <span class="text-muted">{{dateTime .CreatedAt}}</span><p class="finding-note">{{.Text}}</p></article>{{else}}<p class="text-muted">Комментариев пока нет.</p>{{end}}</div></section>
+<section class="card" style="margin-top:18px"><h2 class="card-title">Подтверждающие события</h2>
+{{range .Events}}<article style="border-top:1px solid var(--border);padding:16px 0"><b>{{.Title}}</b> <span class="text-muted">{{dateTime .TimeUTC}} · {{.Channel}} · ID {{.EventID}} · запись {{.RecordID}}</span><p class="finding-summary">{{.Summary}}</p>
+<div class="finding-fields">{{range .EventDescription.Fields}}<div><span class="text-muted">{{.Label}}:</span> {{.Value}}</div>{{end}}</div><details style="margin-top:10px"><summary>Технические данные события</summary><pre class="finding-json">{{.JSON}}</pre></details></article>{{else}}<p class="text-muted">Подтверждающие события недоступны.</p>{{end}}
+</section></div>{{end}}
+{{define "scripts"}}{{end}}

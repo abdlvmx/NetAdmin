@@ -75,6 +75,9 @@ type Config struct {
 	// установленной службы молча не срабатывало, и сузить доступ было негде.
 	ListenAddr   string `json:"listen_addr"`   // пусто = 0.0.0.0:8765
 	AllowSubnets string `json:"allow_subnets"` // пусто = локальные и частные сети
+	TLSCertFile  string `json:"tls_cert_file,omitempty"`
+	TLSKeyFile   string `json:"tls_key_file,omitempty"`
+	PublicURL    string `json:"public_url,omitempty"`
 	// OnboardingHidden — чек-лист первых шагов убран с дашборда вручную.
 	// Хранится здесь, а не у пользователя: чек-лист описывает состояние
 	// установки, а не личный прогресс, и скрытый одним скрыт для всех.

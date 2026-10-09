@@ -86,7 +86,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.LogAction(a.DB, id, "login", "session", ip)
-	setSessionCookie(w, token)
+	setSessionCookie(w, token, r)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -146,7 +146,7 @@ func (a *App) Setup(w http.ResponseWriter, r *http.Request) {
 	id, _ := res.LastInsertId()
 	token, _ := auth.CreateSession(a.DB, id)
 	auth.LogAction(a.DB, id, "initial_setup", orgName, "")
-	setSessionCookie(w, token)
+	setSessionCookie(w, token, r)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -156,6 +156,6 @@ func (a *App) Logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("session"); err == nil {
 		auth.DeleteSession(a.DB, c.Value)
 	}
-	clearSessionCookie(w)
+	clearSessionCookie(w, r)
 	http.Redirect(w, r, "/login", http.StatusFound)
 }

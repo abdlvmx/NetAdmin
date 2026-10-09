@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,8 +39,10 @@ type settingsData struct {
 	Backups             []backup.Info
 	// Адреса, по которым сервер доступен агентам: администратор выбирает,
 	// какой вписать в установщик.
-	ServerAddrs []serverAddr
-	PickedAddr  string
+	ServerAddrs   []serverAddr
+	PickedAddr    string
+	HTTPS         bool
+	HTTPSAgentURL string
 	// Готовая команда установки агента и признак того, что сборка агента
 	// загружена: без неё команда не сработает, и предлагать её нельзя.
 	EnrollCmd   string
@@ -142,8 +145,15 @@ func (a *App) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		BackupDir:           cfg.BackupDir,
 		Backups:             backups,
 
-		ServerAddrs:     localIPv4s(),
-		PickedAddr:      hostOnly(agentServerURL(r)),
+		ServerAddrs: localIPv4s(),
+		PickedAddr:  hostOnly(agentServerURL(r)),
+		HTTPS:       r.TLS != nil,
+		HTTPSAgentURL: func() string {
+			if r.TLS != nil {
+				return agentServerURL(r)
+			}
+			return ""
+		}(),
 		EnrollCmd:       enrollCommand(agentServerURL(r), cfg.AgentToken),
 		AgentUpload:     hasAgentBuild,
 		AgentBuildStale: agentStale,
@@ -314,9 +324,19 @@ func (a *App) AgentInstaller(w http.ResponseWriter, r *http.Request) {
 // сервера: «localhost» в установщике увёл бы каждого агента на его же машину,
 // поэтому подставляем частный адрес интерфейса.
 func agentServerURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+		if transport, err := config.Load().TLSSettingsAt(config.DataDir(), true); err == nil && transport.Enabled() {
+			return transport.PublicURL
+		}
+		// Preserve the certificate name used by the browser; choosing another
+		// interface automatically would break hostname verification on agents.
+		return scheme + "://" + r.Host
+	}
 	host, port, err := net.SplitHostPort(r.Host)
 	if err != nil {
-		return "http://" + r.Host
+		return scheme + "://" + r.Host
 	}
 
 	// Администратор мог выбрать адрес сам — принимаем только тот, что реально
@@ -464,6 +484,9 @@ func (a *App) ChangePassword(w http.ResponseWriter, r *http.Request) {
 // hostOnly вырезает из «http://192.168.1.64:8765» адрес без схемы и порта —
 // им помечается выбранный пункт в списке на странице настроек.
 func hostOnly(u string) string {
+	if parsed, err := url.Parse(u); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
 	s := strings.TrimPrefix(u, "http://")
 	if h, _, err := net.SplitHostPort(s); err == nil {
 		return h

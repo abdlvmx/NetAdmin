@@ -64,12 +64,16 @@ func securityHeaders(w http.ResponseWriter) {
 // ensureCSRF возвращает CSRF-токен из cookie, создавая его при отсутствии.
 func ensureCSRF(w http.ResponseWriter, r *http.Request) string {
 	if c, err := r.Cookie(csrfCookie); err == nil && c.Value != "" {
+		if r.TLS != nil {
+			http.SetCookie(w, &http.Cookie{Name: csrfCookie, Value: c.Value, Path: "/", SameSite: http.SameSiteLaxMode, Secure: true})
+		}
 		return c.Value
 	}
 	tok := randToken()
 	http.SetCookie(w, &http.Cookie{
 		Name: csrfCookie, Value: tok, Path: "/",
 		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil,
 	})
 	return tok
 }
@@ -120,7 +124,7 @@ func (a *App) withSecurity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		securityHeaders(w)
 
-		// Канал не шифруется, поэтому доступ ограничен разрешёнными подсетями.
+		// Доступ ограничен разрешёнными подсетями при HTTP и HTTPS.
 		// Проверка идёт до всего остального: обращение из чужой сети не должно
 		// доходить ни до аутентификации, ни до публичного портала заявок.
 		if !a.Allow.Allows(clientIP(r)) {

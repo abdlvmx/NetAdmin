@@ -39,6 +39,9 @@ func load() {
 		if err != nil || len(b) == 0 {
 			return
 		}
+		if !embeddedCompatible() {
+			return
+		}
 		h := sha256.Sum256(b)
 		data, sum = b, hex.EncodeToString(h[:])
 	})

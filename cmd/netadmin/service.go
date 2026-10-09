@@ -225,8 +225,8 @@ const (
 // безопасности машины, и решать её человеку. Поэтому по умолчанию — вопрос,
 // а для раскатки скриптом есть флаги -firewall и -no-firewall.
 //
-// Параметры правила повторяют deploy/firewall_server.bat: канал не шифруется,
-// и открывать порт шире локального сегмента нельзя.
+// Правило повторяет deploy/firewall_server.bat: открываем только локальный
+// сегмент независимо от использования HTTP или HTTPS.
 func applyFirewall(choice firewallChoice, port string) {
 	open := choice == firewallYes
 	switch choice {

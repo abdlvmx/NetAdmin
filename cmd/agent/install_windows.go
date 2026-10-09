@@ -3,7 +3,7 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,12 +21,19 @@ import (
 
 // downloadClient — отдельный клиент с большим таймаутом для скачивания дистрибутивов.
 var downloadClient = &http.Client{
-	Timeout:   30 * time.Minute,
-	Transport: directAgentTransport(),
+	Timeout:       30 * time.Minute,
+	Transport:     directAgentTransport(),
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
 // installPackage скачивает дистрибутив с сервера, проверяет SHA-256 и тихо ставит.
 func installPackage(payload string) (status, output string, code int) {
+	ctx, cancel := context.WithTimeout(context.Background(), taskTimeout("install", payload))
+	defer cancel()
+	return installPackageContext(ctx, payload)
+}
+
+func installPackageContext(ctx context.Context, payload string) (status, output string, code int) {
 	var p struct {
 		ID       int64  `json:"id"`
 		Name     string `json:"name"`
@@ -52,7 +59,7 @@ func installPackage(payload string) (status, output string, code int) {
 	}
 
 	tmp := filepath.Join(os.TempDir(), "na_"+name)
-	if err := downloadPackage(p.ID, tmp); err != nil {
+	if err := downloadPackageContext(ctx, p.ID, tmp); err != nil {
 		return "failed", "скачивание: " + err.Error(), 1
 	}
 	defer os.Remove(tmp)
@@ -65,18 +72,14 @@ func installPackage(payload string) (status, output string, code int) {
 		return "failed", "контрольная сумма не совпала — дистрибутив подменён или повреждён", 1
 	}
 
-	out, code := runInstaller(p.Kind, tmp, p.Args)
-	status = "done"
-	if code != 0 {
-		status = "failed"
-	}
-	if out == "" {
-		out = fmt.Sprintf("установка завершена (код %d)", code)
-	}
-	return status, out, code
+	return runInstallerContext(ctx, p.Kind, tmp, p.Args)
 }
 
 func downloadPackage(id int64, dst string) error {
+	return downloadPackageContext(context.Background(), id, dst)
+}
+
+func downloadPackageContext(ctx context.Context, id int64, dst string) error {
 	// Тела у GET нет, поэтому подписываем метод и полный URI; ts и nonce
 	// в параметрах защищают от повторного проигрывания запроса.
 	q := url.Values{}
@@ -85,7 +88,7 @@ func downloadPackage(id int64, dst string) error {
 	q.Set("nonce", newNonce())
 	uri := "/api/agent-package?" + q.Encode()
 
-	req, err := http.NewRequest("GET", serverURL+uri, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", serverURL+uri, nil)
 	if err != nil {
 		return err
 	}
@@ -124,6 +127,13 @@ func fileSHA256(path string) (string, error) {
 
 // runInstaller запускает дистрибутив в тихом режиме по типу.
 func runInstaller(kind, path, args string) (string, int) {
+	ctx, cancel := context.WithTimeout(context.Background(), taskTimeout("install", ""))
+	defer cancel()
+	_, out, code := runInstallerContext(ctx, kind, path, args)
+	return out, code
+}
+
+func runInstallerContext(ctx context.Context, kind, path, args string) (string, string, int) {
 	extra := strings.Fields(args)
 	var cmd *exec.Cmd
 	switch kind {
@@ -141,20 +151,6 @@ func runInstaller(kind, path, args string) (string, int) {
 	default: // exe
 		cmd = exec.Command(path, extra...)
 	}
-	hideWindow(cmd)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	err := cmd.Run()
-	code := 0
-	if err != nil {
-		code = 1
-		if ee, ok := err.(*exec.ExitError); ok {
-			code = ee.ExitCode()
-		}
-	}
-	s := strings.TrimSpace(out.String())
-	if len(s) > 6000 {
-		s = s[:6000] + "…"
-	}
-	return s, code
+	out := runProcess(ctx, cmd)
+	return out.Status, out.Output, out.ExitCode
 }

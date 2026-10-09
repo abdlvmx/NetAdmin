@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NetAdmin — {{block "title" .}}{{end}}</title>
+  <title>{{editionName}} — {{block "title" .}}{{end}}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
   <script src="/static/theme.js"></script>
@@ -466,7 +466,7 @@
 <aside class="sidebar">
   <div class="sidebar-logo">
     <span class="mark"><svg class="ico"><use href="#i-shield"/></svg></span>
-    <div class="brand">NetAdmin<small>Управление сетью</small></div>
+    <div class="brand">{{editionName}}<small>Управление сетью</small></div>
   </div>
   <nav class="nav">
     <a title="Дашборд" href="/dashboard" class="{{if eq .Active "dashboard"}}active{{end}}"><svg class="ico"><use href="#i-dashboard"/></svg> <span class="label">Дашборд</span></a>
@@ -482,6 +482,7 @@
     <div class="section-label">Обслуживание</div>
     <a title="Заявки" href="/tickets" class="{{if eq .Active "tickets"}}active{{end}}"><svg class="ico"><use href="#i-ticket"/></svg> <span class="label">Заявки</span></a>
     <a title="Команды" href="/commands" class="{{if eq .Active "commands"}}active{{end}}"><svg class="ico"><use href="#i-terminal"/></svg> <span class="label">Команды</span></a>
+    {{if and (eventsEnabled) .User.IsAdmin}}<a title="События Windows" href="/events" class="{{if eq .Active "securityevents"}}active{{end}}"><svg class="ico"><use href="#i-list"/></svg> <span class="label">События Windows</span></a>{{end}}
     <a title="Установка ПО" href="/packages" class="{{if eq .Active "packages"}}active{{end}}"><svg class="ico"><use href="#i-package"/></svg> <span class="label">Установка ПО</span></a>
 
     <div class="section-label">Учёт</div>

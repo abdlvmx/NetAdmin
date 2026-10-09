@@ -19,6 +19,7 @@ import (
 // App держит общие зависимости хендлеров.
 type App struct {
 	DB     *sql.DB
+	Events eventsStore
 	Ingest *ingest.Writer
 	// Allow — подсети, которым разрешён доступ. Нулевое значение означает
 	// «только локальные и частные сети», поэтому пустая конфигурация
@@ -44,6 +45,7 @@ type App struct {
 // Routes собирает маршруты приложения (с security-обёрткой).
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
+	a.registerEventsRoutes(mux)
 
 	// встроенные скрипты; доступны без сессии — страница входа тоже их грузит
 	mux.Handle("GET /static/", web.Static())
@@ -140,6 +142,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/backup/restore/cancel", a.CancelRestore)
 	mux.HandleFunc("POST /settings/network", a.UpdateNetwork)
 	mux.HandleFunc("POST /settings/restart", a.RestartServer)
+	mux.HandleFunc("GET /settings/diagnostics", a.DiagnosticsPage)
+	mux.HandleFunc("GET /api/diagnostics/archive", a.DiagnosticsArchive)
 	mux.HandleFunc("POST /settings/agent-install-local", a.InstallLocalAgent)
 	// Одноразовые коды регистрации агентов — см. enrollcodes.go
 	mux.HandleFunc("POST /settings/enroll-code", a.CreateEnrollCode)
@@ -213,6 +217,9 @@ func (a *App) Routes() http.Handler {
 	// Очередь удалённых задач (RMM): агент забирает и рапортует результат.
 	mux.HandleFunc("POST /api/agent-tasks/poll", a.AgentTasksPoll)
 	mux.HandleFunc("POST /api/agent-tasks/result", a.AgentTasksResult)
+	mux.HandleFunc("POST /api/agent-tasks/start", a.AgentTaskStart)
+	mux.HandleFunc("POST /api/agent-tasks/state", a.AgentTaskState)
+	mux.HandleFunc("POST /api/tasks/{id}/cancel", a.CancelTask)
 	// Скачивание дистрибутива агентом (по токену; CSRF-exempt по префиксу /api/agent-)
 	mux.HandleFunc("GET /api/agent-package", a.AgentPackageDownload)
 
@@ -270,22 +277,26 @@ func (a *App) agentDeviceIDs() []int64 {
 }
 
 // setSessionCookie ставит httponly cookie сессии на 8 часов.
-func setSessionCookie(w http.ResponseWriter, token string) {
+func setSessionCookie(w http.ResponseWriter, token string, request ...*http.Request) {
+	secure := len(request) > 0 && request[0].TLS != nil
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   secure,
 		MaxAge:   28800,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
+func clearSessionCookie(w http.ResponseWriter, request ...*http.Request) {
+	secure := len(request) > 0 && request[0].TLS != nil
 	http.SetCookie(w, &http.Cookie{
 		Name:   "session",
 		Value:  "",
 		Path:   "/",
 		MaxAge: -1,
+		Secure: secure,
 	})
 }

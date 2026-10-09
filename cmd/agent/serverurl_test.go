@@ -37,7 +37,7 @@ func TestNormalizeServerURL(t *testing.T) {
 // Если адрес указан с https, схему не подменяем: пользователь мог поставить
 // обратный прокси перед сервером.
 func TestNormalizeServerURLKeepsHTTPS(t *testing.T) {
-	if got := normalizeServerURL("https://netadmin.local"); got != "https://netadmin.local:8765" {
+	if got := normalizeServerURL("https://netadmin.local"); got != "https://netadmin.local" {
 		t.Errorf("получено %q", got)
 	}
 	if got := normalizeServerURL("https://netadmin.local:443"); got != "https://netadmin.local:443" {

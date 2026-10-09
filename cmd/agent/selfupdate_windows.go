@@ -18,6 +18,7 @@ import (
 	"unicode"
 
 	"netadmin/internal/agentstatus"
+	"netadmin/internal/edition"
 	"netadmin/internal/installtxn"
 	"netadmin/internal/instdir"
 	"netadmin/internal/winsvc"
@@ -34,24 +35,35 @@ const (
 )
 
 type agentUpdateRequest struct {
-	TaskID      int64  `json:"task_id"`
-	DeviceID    int64  `json:"device_id"`
-	SHA256      string `json:"sha256"`
-	FromVersion string `json:"from_version"`
-	ToVersion   string `json:"to_version"`
-	ServerURL   string `json:"server_url"`
+	ExecutionKey string `json:"execution_key,omitempty"`
+	TaskID       int64  `json:"task_id"`
+	DeviceID     int64  `json:"device_id"`
+	SHA256       string `json:"sha256"`
+	FromVersion  string `json:"from_version"`
+	ToVersion    string `json:"to_version"`
+	ServerURL    string `json:"server_url"`
 }
 
 type agentUpdateResult struct {
-	TaskID    int64  `json:"task_id"`
-	DeviceID  int64  `json:"device_id"`
-	ServerURL string `json:"server_url"`
-	Status    string `json:"status"`
-	Output    string `json:"output"`
-	ExitCode  int    `json:"exit_code"`
+	ExecutionKey string `json:"execution_key,omitempty"`
+	TaskID       int64  `json:"task_id"`
+	DeviceID     int64  `json:"device_id"`
+	ServerURL    string `json:"server_url"`
+	Status       string `json:"status"`
+	Output       string `json:"output"`
+	ExitCode     int    `json:"exit_code"`
 }
 
 var pendingUpdate *agentUpdateRequest
+
+func setUpdateExecutionKey(key string) {
+	if pendingUpdate != nil {
+		pendingUpdate.ExecutionKey = key
+	}
+}
+func updateHandoffPending() bool {
+	return fileExists(filepath.Join(exeDir(), updateRequestName)) || fileExists(filepath.Join(exeDir(), updateResultName))
+}
 
 // Старую сборку нельзя удалять при старте: успешный запуск ещё не подтверждает,
 // что новая версия смогла связаться с сервером. Резервной копией теперь владеет
@@ -61,6 +73,10 @@ func cleanupOldBinary() {}
 // selfUpdate только готовит обновление. Замена работающей службы выполняется
 // отдельным процессом, а результат задачи уходит после проверки новой версии.
 func selfUpdate(payload string) (status, output string, code int) {
+	return selfUpdateContext(context.Background(), payload)
+}
+
+func selfUpdateContext(ctx context.Context, payload string) (status, output string, code int) {
 	if !winsvc.IsService() {
 		return "failed", "самообновление требует службы Windows: установите агента командой agent.exe -install; работающий агент оставлен без изменений", 1
 	}
@@ -87,11 +103,15 @@ func selfUpdate(payload string) (status, output string, code int) {
 	}
 	newPath := exe + ".new"
 	_ = os.Remove(newPath)
-	if err := downloadPackage(p.ID, newPath); err != nil {
+	if err := downloadPackageContext(ctx, p.ID, newPath); err != nil {
 		_ = os.Remove(newPath)
 		return "failed", "скачивание: " + err.Error(), 1
 	}
 	if err := verifyUpdateFile(newPath, p.SHA256); err != nil {
+		_ = os.Remove(newPath)
+		return "failed", err.Error(), 1
+	}
+	if err := verifyUpdateEdition(newPath); err != nil {
 		_ = os.Remove(newPath)
 		return "failed", err.Error(), 1
 	}
@@ -106,7 +126,8 @@ func selfUpdate(payload string) (status, output string, code int) {
 		_ = os.Remove(newPath)
 		return "done", "уже установлена эта сборка " + ver + ", обновление не требуется", 0
 	}
-	pendingUpdate = &agentUpdateRequest{DeviceID: deviceID, SHA256: p.SHA256, FromVersion: agentVersion,
+	_, id := agentIdentity()
+	pendingUpdate = &agentUpdateRequest{DeviceID: id, SHA256: p.SHA256, FromVersion: agentVersion,
 		ToVersion: ver, ServerURL: serverURL}
 	return "done", "сборка проверена; ожидается перезапуск службы и подтверждение связи", 0
 }
@@ -206,6 +227,9 @@ func applyPendingUpdate(dir string) int {
 	if err := verifyUpdateFile(candidate, r.SHA256); err != nil {
 		return finishUpdate(dir, r, err)
 	}
+	if err := verifyUpdateEdition(candidate); err != nil {
+		return finishUpdate(dir, r, err)
+	}
 	ver, err := probeBinary(candidate)
 	if err != nil || ver != r.ToVersion {
 		return finishUpdate(dir, r, fmt.Errorf("повторная проверка сборки: версия %q, ошибка %v", ver, err))
@@ -258,7 +282,7 @@ func applyAgentUpdate(dir, candidate string, ops updateServiceOps) error {
 }
 
 func finishUpdate(dir string, r agentUpdateRequest, updateErr error) int {
-	result := agentUpdateResult{TaskID: r.TaskID, DeviceID: r.DeviceID, ServerURL: r.ServerURL, Status: "done",
+	result := agentUpdateResult{TaskID: r.TaskID, ExecutionKey: r.ExecutionKey, DeviceID: r.DeviceID, ServerURL: r.ServerURL, Status: "done",
 		Output: "обновление " + r.FromVersion + " → " + r.ToVersion + ": служба запущена, связь с сервером подтверждена"}
 	if updateErr != nil {
 		result.Status, result.ExitCode = "failed", 1
@@ -328,14 +352,18 @@ func sendUpdateResult(dir string) bool {
 	if r.ServerURL != serverURL || r.DeviceID != st.DeviceID {
 		return false
 	}
-	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
+	setAgentIdentity(unprotectString(st.DeviceToken), st.DeviceID)
 	if deviceToken == "" || deviceID <= 0 {
 		return false
 	}
-	status, _, err := post("/api/agent-tasks/result", map[string]any{
+	status, body, err := post("/api/agent-tasks/result", map[string]any{
 		"id": r.TaskID, "status": r.Status, "result": r.Output, "exit_code": r.ExitCode,
+		"execution_key": r.ExecutionKey,
 	})
-	if err == nil && status == http.StatusOK {
+	var ack struct {
+		OK bool `json:"ok"`
+	}
+	if err == nil && status == http.StatusOK && json.Unmarshal(body, &ack) == nil && ack.OK {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			log.Printf("удаление отправленного результата обновления: %v", err)
 			return false
@@ -371,6 +399,19 @@ func verifyUpdateFile(path, expected string) error {
 	}
 	if !strings.EqualFold(sum, expected) {
 		return errors.New("контрольная сумма не совпала — сборка подменена или повреждена")
+	}
+	return nil
+}
+
+// Remote updates preserve the edition. Choosing another edition is a separate
+// installation action, not an accidental consequence of matching version text.
+func verifyUpdateEdition(path string) error {
+	actual, err := edition.ReadBinary(path)
+	if err != nil {
+		return fmt.Errorf("редакция обновления не подтверждена: %w", err)
+	}
+	if actual != edition.ID {
+		return fmt.Errorf("редакция обновления %q отличается от установленной %q; для смены редакции переустановите агента", actual, edition.ID)
 	}
 	return nil
 }

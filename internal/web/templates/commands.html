@@ -80,6 +80,8 @@
               {{if eq .Status "done"}}<span class="badge badge-green">выполнено</span>
               {{else if eq .Status "failed"}}<span class="badge badge-red">ошибка</span>
               {{else if eq .Status "sent"}}<span class="badge badge-accent">отправлено</span>
+              {{else if eq .Status "running"}}<span class="badge badge-accent">выполняется</span>
+              {{else if eq .Status "cancelled"}}<span class="badge badge-gray">отменено</span>
               {{else}}<span class="badge badge-amber">ожидает</span>{{end}}
             </td>
             <td class="text-muted" style="word-break:break-word">{{if .Result}}{{.Result}}{{else}}—{{end}}</td>

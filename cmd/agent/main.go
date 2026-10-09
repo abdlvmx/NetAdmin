@@ -5,9 +5,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,9 +26,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"netadmin/internal/agentstatus"
+	"netadmin/internal/edition"
+	"netadmin/internal/taskrun"
 	"netadmin/internal/version"
 	"netadmin/internal/wincon"
 	"netadmin/internal/winsvc"
@@ -60,7 +65,8 @@ var (
 // но каждый запрос падает с «unsupported protocol scheme». Ошибка молчаливая и
 // повторяется на всём парке, поэтому проще достроить адрес, чем ловить её.
 //
-// Схема по умолчанию http (TLS в продукте нет), порт по умолчанию 8765.
+// Без схемы используется HTTP и порт 8765. Для явно указанного HTTPS без
+// порта сохраняется стандартный порт 443.
 func normalizeServerURL(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimRight(s, "/") // иначе в пути получится двойной слеш
@@ -74,7 +80,7 @@ func normalizeServerURL(s string) string {
 	if err != nil || u.Host == "" {
 		return s // не разобрали — оставляем как есть, ошибка вылезет при запросе
 	}
-	if u.Port() == "" {
+	if u.Port() == "" && u.Scheme != "https" {
 		u.Host = net.JoinHostPort(u.Hostname(), "8765")
 	}
 	return u.String()
@@ -91,11 +97,12 @@ const (
 // maxRespBytes — потолок ответа сервера, чтобы подставной сервер не выел память.
 const maxRespBytes = 4 << 20
 
-// HTTP-клиент для связи с сервером. Только локальная сеть, обычный HTTP:
-// подлинность и целостность обмена обеспечивает HMAC-подпись, не транспорт.
+// Клиент поддерживает HTTP и HTTPS. HTTPS проверяет сертификат по системному
+// хранилищу доверия; HMAC дополнительно проверяет подписанные запросы и ответы.
 var httpClient = &http.Client{
-	Timeout:   10 * time.Second,
-	Transport: directAgentTransport(),
+	Timeout:       10 * time.Second,
+	Transport:     directAgentTransport(),
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
 // Agent traffic targets the configured LAN server. Console proxy variables
@@ -103,6 +110,7 @@ var httpClient = &http.Client{
 func directAgentTransport() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil
+	t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	return t
 }
 
@@ -133,13 +141,27 @@ type agentState struct {
 
 // deviceToken/deviceID — реквизиты, выданные сервером при регистрации.
 var (
-	deviceToken string
-	deviceID    int64
+	deviceToken  string
+	deviceID     int64
+	credentialMu sync.RWMutex
 )
+
+func setAgentIdentity(key string, id int64) {
+	credentialMu.Lock()
+	deviceToken, deviceID = key, id
+	credentialMu.Unlock()
+}
+func agentIdentity() (string, int64) {
+	credentialMu.RLock()
+	defer credentialMu.RUnlock()
+	return deviceToken, deviceID
+}
 
 // authKey возвращает ключ HMAC и заголовок, по которому сервер этот ключ найдёт.
 // Пока устройство не зарегистрировано, работаем по enrollment-токену.
 func authKey() (key, hdrName, hdrValue string) {
+	credentialMu.RLock()
+	defer credentialMu.RUnlock()
 	if deviceToken != "" && deviceID > 0 {
 		return deviceToken, hdrDevice, strconv.FormatInt(deviceID, 10)
 	}
@@ -214,6 +236,7 @@ func collectMetrics() map[string]any {
 		"ram":           round1(ramPct),
 		"disk":          round1(diskPct),
 		"agent_version": agentVersion,
+		"capabilities":  agentCapabilities(),
 	}
 	for k, v := range hardwareInfo() {
 		m[k] = v
@@ -422,6 +445,14 @@ func main() {
 		fmt.Println(agentVersion)
 		return
 	}
+	if len(os.Args) > 1 && (os.Args[1] == "-build-version" || os.Args[1] == "--build-version") {
+		fmt.Println(edition.Name + " " + version.Full())
+		return
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "-edition" || os.Args[1] == "--edition") {
+		fmt.Println(edition.ID)
+		return
+	}
 
 	if handled, code := runUpdateHelperCommand(os.Args[1:]); handled {
 		os.Exit(code)
@@ -506,7 +537,7 @@ func run(stop <-chan struct{}) error {
 	log.Printf("NetAdmin agent %s → %s (настройки: %s)", agentVersion, serverURL, settingsSource)
 	cleanupOldBinary() // остаток прошлого самообновления
 	st := loadState()
-	deviceToken, deviceID = unprotectString(st.DeviceToken), st.DeviceID
+	setAgentIdentity(unprotectString(st.DeviceToken), st.DeviceID)
 	if deviceToken == "" && token == "" {
 		// Ключ сам не появится: перезапуск службы ничего не изменит.
 		return winsvc.Permanent(errors.New("не задан ключ регистрации: запустите agent.exe " +
@@ -515,6 +546,26 @@ func run(stop <-chan struct{}) error {
 	var lastSent map[string]any
 	var lastHB time.Time
 	var lastStatus agentstatus.Status
+	jobs, err := taskrun.Open(filepath.Join(exeDir(), "agent_task.json"), runTaskContext)
+	if err != nil {
+		return winsvc.Permanent(fmt.Errorf("журнал задач: %w", err))
+	}
+	defer jobs.Close()
+	taskContext, stopTasks := context.WithCancel(context.Background())
+	defer stopTasks()
+	startEventWorker(taskContext)
+	defer func() {
+		stopTasks()
+		jobs.Cancel()
+		deadline := time.Now().Add(3 * time.Second)
+		for jobs.Record != nil && jobs.Record.Phase == "running" && time.Now().Before(deadline) {
+			if jobs.Collect() {
+				_ = jobs.Save()
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
 
 	for {
 		metrics := collectMetrics()
@@ -536,7 +587,7 @@ func run(stop <-chan struct{}) error {
 			case status == 401:
 				if deviceToken != "" {
 					log.Println("токен отозван — перерегистрация по enrollment-токену")
-					deviceToken, deviceID = "", 0
+					setAgentIdentity("", 0)
 					st.DeviceToken, st.DeviceID = "", 0
 					saveState(st)
 				} else {
@@ -559,7 +610,7 @@ func run(stop <-chan struct{}) error {
 						lastStatus.LastError = "сервер не выдал идентификатор устройства; регистрация не подтверждена"
 						break
 					}
-					deviceToken, deviceID = resp.Token, resp.DeviceID
+					setAgentIdentity(resp.Token, resp.DeviceID)
 					st.DeviceToken = protectString(resp.Token) // DPAPI на Windows
 					st.DeviceID = resp.DeviceID
 					log.Println("получен персональный токен устройства")
@@ -656,7 +707,7 @@ func run(stop <-chan struct{}) error {
 
 		// удалённые задачи (RMM): забираем и выполняем (только после регистрации)
 		if deviceToken != "" && deviceID > 0 {
-			pollTasks()
+			pumpTasks(taskContext, jobs)
 		}
 
 		// Пауза до следующего круга. Служба должна останавливаться сразу, а не
@@ -668,37 +719,5 @@ func run(stop <-chan struct{}) error {
 			return nil
 		case <-time.After(pollInterval):
 		}
-	}
-}
-
-// pollTasks забирает ожидающие задачи устройства, выполняет их и рапортует результат.
-func pollTasks() {
-	host, _ := os.Hostname()
-	_, body, err := post("/api/agent-tasks/poll", map[string]any{"hostname": host})
-	if err != nil {
-		return
-	}
-	var resp struct {
-		Tasks []struct {
-			ID      int64  `json:"id"`
-			Kind    string `json:"kind"`
-			Payload string `json:"payload"`
-		} `json:"tasks"`
-	}
-	if json.Unmarshal(body, &resp) != nil {
-		return
-	}
-	for _, t := range resp.Tasks {
-		status, output, code := runTask(t.Kind, t.Payload)
-		if launched, err := launchPendingUpdate(t.ID); err != nil {
-			status, output, code = "failed", "запуск обновления: "+err.Error(), 1
-		} else if launched {
-			// Помощник отправит итог после нового heartbeat либо отката.
-			return
-		}
-		log.Printf("задача #%d (%s): %s", t.ID, t.Kind, status)
-		_, _, _ = post("/api/agent-tasks/result", map[string]any{
-			"id": t.ID, "status": status, "result": output, "exit_code": code,
-		})
 	}
 }

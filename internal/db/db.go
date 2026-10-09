@@ -266,6 +266,10 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
     created_by INTEGER,
     created_at TEXT DEFAULT (datetime('now')),
     sent_at    TEXT,
+    task_protocol INTEGER DEFAULT 1,
+    started_at TEXT,
+    execution_key TEXT DEFAULT '',
+    cancel_requested INTEGER DEFAULT 0,
     done_at    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_device ON agent_tasks(device_id, status);
@@ -389,7 +393,12 @@ func InitSchema(d *sql.DB) error {
 		{"devices", "disk_total_gb", "INTEGER DEFAULT 0"},
 		{"devices", "os_version", "TEXT DEFAULT ''"},
 		{"devices", "agent_version", "TEXT DEFAULT ''"},
+		{"devices", "agent_capabilities", "TEXT DEFAULT ''"},
 		{"agent_tasks", "package_id", "INTEGER DEFAULT 0"},
+		{"agent_tasks", "task_protocol", "INTEGER DEFAULT 1"},
+		{"agent_tasks", "started_at", "TEXT"},
+		{"agent_tasks", "execution_key", "TEXT DEFAULT ''"},
+		{"agent_tasks", "cancel_requested", "INTEGER DEFAULT 0"},
 		{"sessions", "last_activity", "TEXT"},
 		{"snmp_devices", "supply_alert", "INTEGER DEFAULT 0"},
 	} {

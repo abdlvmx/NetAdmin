@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"netadmin/internal/edition"
 	"netadmin/internal/tz"
 )
 
@@ -89,17 +90,19 @@ var demoMode bool
 func SetDemo(v bool) { demoMode = v }
 
 var funcMap = template.FuncMap{
-	"demo":        func() bool { return demoMode },
-	"upper":       strings.ToUpper,
-	"actionIcon":  actionIcon,
-	"actionCat":   actionCat,
-	"today":       tz.TodayRU,
-	"statusRu":    statusRu,
-	"statusBadge": statusBadge,
-	"prioRu":      prioRu,
-	"prioBadge":   prioBadge,
-	"sizeMB":      sizeMB,
-	"dateTime":    dateTime,
+	"eventsEnabled": func() bool { return edition.Events },
+	"editionName":   func() string { return edition.Name },
+	"demo":          func() bool { return demoMode },
+	"upper":         strings.ToUpper,
+	"actionIcon":    actionIcon,
+	"actionCat":     actionCat,
+	"today":         tz.TodayRU,
+	"statusRu":      statusRu,
+	"statusBadge":   statusBadge,
+	"prioRu":        prioRu,
+	"prioBadge":     prioBadge,
+	"sizeMB":        sizeMB,
+	"dateTime":      dateTime,
 }
 
 // sizeMB — размер файла в мегабайтах для таблиц.
@@ -204,9 +207,13 @@ var standalone = template.Must(
 var layoutPages = map[string]*template.Template{}
 
 func init() {
-	for _, name := range []string{"dashboard", "devices", "device_detail", "employees", "users", "settings", "audit", "profile", "network_map", "network_changes", "licenses", "discovery",
+	pages := []string{"dashboard", "devices", "device_detail", "employees", "users", "settings", "diagnostics", "audit", "profile", "network_map", "network_changes", "licenses", "discovery",
 		"servicemon", "sla", "capacity", "topology", "forbidden", "disk_health",
-		"tickets", "ticket_detail", "snmp", "snmp_ports", "commands", "packages"} {
+		"tickets", "ticket_detail", "snmp", "snmp_ports", "commands", "packages"}
+	if edition.Events {
+		pages = append(pages, "securityevents", "securityfinding")
+	}
+	for _, name := range pages {
 		layoutPages[name] = template.Must(
 			template.New(name).Funcs(funcMap).
 				ParseFS(fsys, "templates/layout.html", "templates/"+name+".html"),

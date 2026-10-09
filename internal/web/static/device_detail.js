@@ -70,8 +70,13 @@ const loaders = {
     t=>{ const st = t.status==='done' ? '<span class="badge badge-green">выполнено</span>'
         : t.status==='failed' ? '<span class="badge badge-red">ошибка</span>'
         : t.status==='sent' ? '<span class="badge badge-accent">отправлено</span>'
+        : t.status==='running' ? '<span class="badge badge-accent">выполняется</span>'
+        : t.status==='cancelled' ? '<span class="badge badge-gray">отменено</span>'
         : '<span class="badge badge-amber">ожидает</span>';
-      return `<tr><td class="text-muted" style="white-space:nowrap">${esc(t.created)}</td><td>${esc(t.label||t.kind)}</td><td>${st}</td><td class="text-muted" style="word-break:break-word">${esc(t.result)||'—'}</td></tr>`; }, 4),
+      const cancel = t.cancel_requested ? '<div class="text-muted">Отмена запрошена</div>'
+        : t.can_cancel ? `<div><button class="btn btn-sm btn-ghost" type="button" data-act="cancelTask" data-task-id="${Number(t.id)}">Отменить</button></div>` : '';
+      const code = (t.status==='done'||t.status==='failed'||t.status==='cancelled') ? `<div>Код завершения: ${Number(t.exit_code)}</div>` : '';
+      return `<tr><td class="text-muted" style="white-space:nowrap">${esc(t.created)}</td><td>${esc(t.label||t.kind)}</td><td>${st}${cancel}</td><td class="text-muted" style="word-break:break-word;white-space:pre-wrap">${esc(t.result)||'—'}${code}</td></tr>`; }, 4),
   metrics: () => loadMetrics(),
 };
 const loaded = {};
@@ -149,7 +154,8 @@ async function ddRunCommand(){
   }catch(e){ toast('Ошибка запуска команды','err'); }
 }
 async function ddPower(action){
-  if(action!=='wol' && !confirm(`Точно ${POWER_LABELS[action]} устройство ${DEV_HOST}?`)) return;
+  const warning=(action==='reboot'||action==='shutdown') ? '\nWindows выполнит действие через 30 секунд и может принудительно закрыть приложения. Несохранённые данные могут быть потеряны.' : '';
+  if(action!=='wol' && !confirm(`Точно ${POWER_LABELS[action]} устройство ${DEV_HOST}?${warning}`)) return;
   try{
     const fd = new URLSearchParams({action});
     const d = await (await fetch(`/devices/${DEV_ID}/power`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':window.csrfToken},body:fd})).json();
@@ -190,3 +196,13 @@ window.actions.ping = function () { ddPing(); };
 window.actions.scanPorts = function (el) { ddScanPorts(el); };
 window.actions.runCommand = function () { ddRunCommand(); };
 window.actions.selfcheck = function (el) { ddSelfCheck(el); };
+window.actions.cancelTask = async function(el){
+  if(!confirm('Запросить отмену задачи? Уже выполненные действия сохранятся.')) return;
+  el.disabled=true;
+  try{
+    const response=await fetch(`/api/tasks/${Number(el.dataset.taskId)}/cancel`,{method:'POST',headers:{'X-CSRF-Token':window.csrfToken}});
+    if(!response.ok) throw new Error('Задача уже завершена либо агент не поддерживает отмену.');
+    toast('Отмена запрошена','ok'); await loaders.tasks();
+  }catch(e){toast(e.message||'Не удалось запросить отмену','err');el.disabled=false;}
+};
+setInterval(()=>{const pane=document.getElementById('pane-tasks');if(pane && !document.hidden && !pane.hidden) loaders.tasks();},15000);

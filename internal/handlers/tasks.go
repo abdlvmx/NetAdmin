@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"netadmin/internal/auth"
+	"netadmin/internal/taskrun"
 	"netadmin/internal/tz"
 )
 
@@ -43,32 +47,62 @@ func (a *App) AgentTasksPoll(w http.ResponseWriter, r *http.Request) {
 		Payload string `json:"payload"`
 	}
 	tasks := []task{}
+	var request struct {
+		Protocol int `json:"protocol"`
+	}
+	if json.Unmarshal(ag.Body, &request) != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
 	// до завершения enrollment у агента нет device_id — задач не выдаём
 	if !ag.Enroll && ag.DeviceID > 0 {
-		rows, err := a.DB.Query(`SELECT id, COALESCE(kind,''), COALESCE(payload,'')
-			FROM agent_tasks WHERE device_id=? AND status='pending' ORDER BY id LIMIT 20`, ag.DeviceID)
-		if err == nil {
+		// A single UPDATE is the claim. There is no SELECT/UPDATE race between
+		// concurrent polls. Protocol 2 redelivers until the durable start ACK.
+		query := `UPDATE agent_tasks SET status='sent', sent_at=COALESCE(sent_at,datetime('now')),task_protocol=1
+			WHERE device_id=? AND status='pending' AND id IN (
+			SELECT id FROM agent_tasks WHERE device_id=? AND status='pending'
+			AND id<=COALESCE((SELECT MIN(id) FROM agent_tasks WHERE device_id=? AND status='pending' AND kind='selfupdate'),9223372036854775807)
+			ORDER BY id LIMIT 20) RETURNING id,COALESCE(kind,''),COALESCE(payload,'')`
+		args := []any{ag.DeviceID, ag.DeviceID, ag.DeviceID}
+		if request.Protocol == 2 {
+			query = `UPDATE agent_tasks SET status='sent', sent_at=COALESCE(sent_at,datetime('now')),task_protocol=2
+			WHERE device_id=? AND id=(SELECT id FROM agent_tasks WHERE device_id=?
+			AND (status='pending' OR (status='sent' AND task_protocol=2)) ORDER BY id LIMIT 1)
+			AND (status='pending' OR (status='sent' AND task_protocol=2))
+			RETURNING id,COALESCE(kind,''),COALESCE(payload,'')`
+			args = []any{ag.DeviceID, ag.DeviceID}
+		}
+		rows, err := a.DB.QueryContext(r.Context(), query, args...)
+		if err != nil {
+			log.Printf("AgentTasksPoll: %v", err)
+			http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		{
 			for rows.Next() {
 				var t task
-				if rows.Scan(&t.ID, &t.Kind, &t.Payload) == nil {
-					tasks = append(tasks, t)
-					// An update stops this process. Later tasks must remain
-					// pending so the new (or restored) agent can collect them.
-					if t.Kind == "selfupdate" {
-						break
-					}
+				if err = rows.Scan(&t.ID, &t.Kind, &t.Payload); err != nil {
+					break
 				}
+				tasks = append(tasks, t)
 			}
-			if err := rows.Err(); err != nil {
-				log.Printf("AgentTasksPoll: %v", err)
+			if err == nil {
+				err = rows.Err()
 			}
 			rows.Close()
+			if err != nil {
+				log.Printf("AgentTasksPoll: %v", err)
+				http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
+				return
+			}
 		}
-		for _, t := range tasks {
-			a.DB.Exec("UPDATE agent_tasks SET status='sent', sent_at=datetime('now') WHERE id=?", t.ID)
-		}
+		sort.Slice(tasks, func(i, j int) bool { return tasks[i].ID < tasks[j].ID })
 	}
-	writeAgentJSON(w, ag.Key, map[string]any{"tasks": tasks})
+	protocol := 1
+	if request.Protocol == 2 {
+		protocol = 2
+	}
+	writeAgentJSON(w, ag.Key, map[string]any{"tasks": tasks, "protocol": protocol})
 }
 
 // AgentTasksResult — POST /api/agent-tasks/result : агент сообщает результат задачи.
@@ -78,47 +112,76 @@ func (a *App) AgentTasksResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p struct {
-		ID       int64  `json:"id"`
-		Status   string `json:"status"` // done|failed
-		Result   string `json:"result"`
-		ExitCode int    `json:"exit_code"`
+		ID           int64  `json:"id"`
+		Status       string `json:"status"` // done|failed
+		Result       string `json:"result"`
+		ExitCode     int    `json:"exit_code"`
+		ExecutionKey string `json:"execution_key"`
 	}
 	if err := json.Unmarshal(ag.Body, &p); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	status := "done"
-	if p.Status == "failed" {
-		status = "failed"
+	if ag.Enroll || ag.DeviceID <= 0 || p.ID <= 0 || (p.Status != "done" && p.Status != "failed" && p.Status != "cancelled") {
+		http.Error(w, "invalid task result", http.StatusBadRequest)
+		return
 	}
-	result := p.Result
-	if len(result) > 8000 { // ограничиваем объём результата
-		result = result[:8000] + "…"
-	}
+	status, result := p.Status, taskrun.LimitOutput(p.Result)
 	// обновляем только задачу, принадлежащую этому устройству
-	a.DB.Exec(`UPDATE agent_tasks SET status=?, result=?, exit_code=?, done_at=datetime('now')
-		WHERE id=? AND device_id=?`, status, result, p.ExitCode, p.ID, ag.DeviceID)
+	res, err := a.DB.ExecContext(r.Context(), `UPDATE agent_tasks SET status=?, result=?, exit_code=?,done_at=datetime('now'),cancel_requested=0
+		WHERE id=? AND device_id=? AND status IN ('sent','running')
+		AND (task_protocol=1 OR execution_key=? OR execution_key='' OR (kind='selfupdate' AND ?=''))`, status, result, p.ExitCode, p.ID, ag.DeviceID, p.ExecutionKey, p.ExecutionKey)
+	if err != nil {
+		http.Error(w, "result not saved", http.StatusServiceUnavailable)
+		return
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		http.Error(w, "result not saved", http.StatusServiceUnavailable)
+		return
+	}
+	if n == 0 {
+		var oldStatus, oldResult, key, kind string
+		var code, protocol int
+		err = a.DB.QueryRowContext(r.Context(), `SELECT status,COALESCE(result,''),exit_code,task_protocol,COALESCE(execution_key,''),COALESCE(kind,'') FROM agent_tasks WHERE id=? AND device_id=?`, p.ID, ag.DeviceID).Scan(&oldStatus, &oldResult, &code, &protocol, &key, &kind)
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "task not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "result not saved", http.StatusServiceUnavailable)
+			return
+		}
+		if oldStatus != status || oldResult != result || code != p.ExitCode || (protocol == 2 && key != "" && key != p.ExecutionKey && !(kind == "selfupdate" && p.ExecutionKey == "")) {
+			http.Error(w, "result conflicts with saved state", http.StatusConflict)
+			return
+		}
+	}
 	writeAgentJSON(w, ag.Key, map[string]any{"ok": true})
 }
 
 // DeviceTasks — GET /api/devices/{id}/tasks : история удалённых действий устройства.
 func (a *App) DeviceTasks(w http.ResponseWriter, r *http.Request) {
-	if auth.CurrentUser(a.DB, r) == nil {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	rows, err := a.DB.Query(`SELECT COALESCE(label,''), COALESCE(kind,''), COALESCE(status,''),
-		exit_code, COALESCE(result,''), COALESCE(created_at,''), COALESCE(done_at,'')
+	rows, err := a.DB.Query(`SELECT id,COALESCE(label,''), COALESCE(kind,''), COALESCE(status,''),
+		exit_code, COALESCE(result,''), COALESCE(created_at,''), COALESCE(done_at,''),task_protocol,COALESCE(cancel_requested,0)
 		FROM agent_tasks WHERE device_id=? ORDER BY id DESC LIMIT 100`, id)
 	type item struct {
-		Label    string `json:"label"`
-		Kind     string `json:"kind"`
-		Status   string `json:"status"`
-		ExitCode int    `json:"exit_code"`
-		Result   string `json:"result"`
-		Created  string `json:"created"`
-		Done     string `json:"done"`
+		ID              int64  `json:"id"`
+		CanCancel       bool   `json:"can_cancel"`
+		CancelRequested bool   `json:"cancel_requested"`
+		Label           string `json:"label"`
+		Kind            string `json:"kind"`
+		Status          string `json:"status"`
+		ExitCode        int    `json:"exit_code"`
+		Result          string `json:"result"`
+		Created         string `json:"created"`
+		Done            string `json:"done"`
 	}
 	items := []item{}
 	if err == nil {
@@ -126,7 +189,9 @@ func (a *App) DeviceTasks(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var it item
 			var created, done string
-			if rows.Scan(&it.Label, &it.Kind, &it.Status, &it.ExitCode, &it.Result, &created, &done) == nil {
+			var protocol int
+			if rows.Scan(&it.ID, &it.Label, &it.Kind, &it.Status, &it.ExitCode, &it.Result, &created, &done, &protocol, &it.CancelRequested) == nil {
+				it.CanCancel = user.CanWrite() && (it.Status == "pending" || (protocol == 2 && (it.Status == "sent" || it.Status == "running")))
 				it.Created = tz.DateTime(created)
 				it.Done = tz.DateTime(done)
 				items = append(items, it)

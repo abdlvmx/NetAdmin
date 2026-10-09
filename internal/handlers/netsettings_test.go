@@ -13,6 +13,25 @@ import (
 
 func location(rec *httptest.ResponseRecorder) string { return rec.Header().Get("Location") }
 
+func TestHTTPSNetworkFormRejectsPortChangeWithoutUpdatingPublicURL(t *testing.T) {
+	app := newTestApp(t)
+	admin := sessionFor(t, app, "https-admin", "admin")
+	cfg := config.Load()
+	cfg.TLSCertFile, cfg.TLSKeyFile, cfg.PublicURL = "server.crt", "server.key", "https://panel.example.test:8765"
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"listen_addr": {"0.0.0.0:9000"}}
+	r := httptest.NewRequest("POST", "/settings/network", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(admin)
+	w := httptest.NewRecorder()
+	app.UpdateNetwork(w, r)
+	if !strings.Contains(location(w), "error=") || config.Load().ListenAddr != "" {
+		t.Fatalf("HTTPS port changed without public URL: %s", location(w))
+	}
+}
+
 // TestUpdateNetworkRefusesSelfLockout — главная защита формы: список подсетей,
 // не включающий адрес того, кто его задаёт, после перезапуска отрезал бы доступ
 // к интерфейсу, и вернуть его можно было бы только правкой config.json руками

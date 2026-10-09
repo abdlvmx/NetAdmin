@@ -16,7 +16,7 @@ import (
 	"netadmin/internal/ingest"
 )
 
-// Протокол обмена с агентом рассчитан на работу без шифрования канала.
+// Подписи сообщений агента работают поверх HTTP и HTTPS.
 // Токен устройства по сети НЕ передаётся: он служит только ключом HMAC-SHA256,
 // а сервер выбирает ключ по идентификатору устройства из заголовка. Перехват
 // трафика поэтому не выдаёт ключа. Ответы сервера подписываются тем же ключом —
@@ -252,21 +252,33 @@ func (a *App) AgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var d struct {
-		Hostname     string  `json:"hostname"`
-		OS           string  `json:"os"`
-		CPU          float64 `json:"cpu"`
-		RAM          float64 `json:"ram"`
-		Disk         float64 `json:"disk"`
-		CPUModel     string  `json:"cpu_model"`
-		RAMTotalGB   int     `json:"ram_total_gb"`
-		DiskTotalGB  int     `json:"disk_total_gb"`
-		OSVersion    string  `json:"os_version"`
-		AgentVersion string  `json:"agent_version"`
+		Hostname     string   `json:"hostname"`
+		OS           string   `json:"os"`
+		CPU          float64  `json:"cpu"`
+		RAM          float64  `json:"ram"`
+		Disk         float64  `json:"disk"`
+		CPUModel     string   `json:"cpu_model"`
+		RAMTotalGB   int      `json:"ram_total_gb"`
+		DiskTotalGB  int      `json:"disk_total_gb"`
+		OSVersion    string   `json:"os_version"`
+		AgentVersion string   `json:"agent_version"`
+		Capabilities []string `json:"capabilities"`
 	}
 	if err := json.Unmarshal(ag.Body, &d); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
+	if len(d.Capabilities) > 16 {
+		http.Error(w, "too many capabilities", http.StatusBadRequest)
+		return
+	}
+	for _, capability := range d.Capabilities {
+		if len(capability) > 64 {
+			http.Error(w, "invalid capability", http.StatusBadRequest)
+			return
+		}
+	}
+	capabilities, _ := json.Marshal(d.Capabilities)
 
 	deviceID := ag.DeviceID
 	issuedToken := ""
@@ -331,12 +343,13 @@ func (a *App) AgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		ram_total_gb=CASE WHEN ?>0 THEN ? ELSE ram_total_gb END,
 		disk_total_gb=CASE WHEN ?>0 THEN ? ELSE disk_total_gb END,
 		os_version=CASE WHEN ?<>'' THEN ? ELSE os_version END,
-		agent_version=CASE WHEN ?<>'' THEN ? ELSE agent_version END
+		agent_version=CASE WHEN ?<>'' THEN ? ELSE agent_version END,
+		agent_capabilities=?
 		WHERE id=?`,
 		d.OS, d.CPU, d.RAM, d.Disk,
 		d.CPUModel, d.CPUModel, d.RAMTotalGB, d.RAMTotalGB,
 		d.DiskTotalGB, d.DiskTotalGB, d.OSVersion, d.OSVersion,
-		d.AgentVersion, d.AgentVersion, deviceID)
+		d.AgentVersion, d.AgentVersion, string(capabilities), deviceID)
 	// историю метрик пишем пачкой в фоне (батч + ретеншн в воркере)
 	a.Ingest.Metric(ingest.MetricRow{DeviceID: deviceID, CPU: d.CPU, RAM: d.RAM, Disk: d.Disk})
 

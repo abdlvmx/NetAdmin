@@ -173,6 +173,7 @@ func (a *App) DevicesStatus(w http.ResponseWriter, r *http.Request) {
 	// Ревизия учитывает состав и содержание сводки: одна исчезнувшая проблема
 	// и одна новая меняют список даже при неизменном количестве.
 	issues := a.issueGroups()
+	issues = append(issues, a.eventsIssueGroups(r)...)
 	writeJSON(w, map[string]any{
 		"devices":         list,
 		"issues_revision": issuesRevision(issues),

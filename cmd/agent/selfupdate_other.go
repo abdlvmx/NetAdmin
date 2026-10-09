@@ -9,3 +9,5 @@ func cleanupOldBinary()                           {}
 func launchPendingUpdate(int64) (bool, error)     { return false, nil }
 func runUpdateHelperCommand([]string) (bool, int) { return false, 0 }
 func flushUpdateResult()                          {}
+func setUpdateExecutionKey(string)                {}
+func updateHandoffPending() bool                  { return false }

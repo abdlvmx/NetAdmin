@@ -1,0 +1,50 @@
+{{define "title"}}Диагностика{{end}}
+
+{{define "content"}}
+<div class="topbar">
+  <div>
+    <h1>Диагностика</h1>
+    <div class="sub">Понятные проверки состояния сервера и следующие шаги</div>
+  </div>
+  <a class="btn btn-ghost" href="/settings">К настройкам</a>
+</div>
+
+<div class="content">
+  <div class="card">
+    <div class="card-header" style="flex-wrap:wrap">
+      <div>
+        <h2 class="card-title" style="margin:0">{{if .Report.AttentionCount}}Требуют внимания: {{.Report.AttentionCount}}{{else if .Report.UncheckedCount}}Есть незавершённые проверки{{else}}Проверки завершены{{end}}</h2>
+        <p class="text-muted" style="margin:8px 0 0">Снимок от {{dateTime .Report.Summary.CreatedAt}} · NetAdmin {{.Report.Summary.Version}}</p>
+      </div>
+      <a class="btn btn-ghost" href="/settings/diagnostics">Повторить проверку</a>
+    </div>
+    <p class="text-muted">Проверка читает сохранённые данные. Доступность из другого компьютера, брандмауэр и целостность резервных копий проверяются отдельно. Изменённые сетевые настройки могут требовать перезапуска.</p>
+    {{if .Report.Summary.Agents.Known}}<p><b>Агенты:</b> {{.Report.Summary.Agents.Online}} на связи из {{.Report.Summary.Agents.Total}}.</p>{{end}}
+    {{if .Report.Summary.Tasks.Known}}<p><b>Удалённые задачи:</b> {{.Report.Summary.Tasks.Pending}} ожидают выполнения; {{.Report.Summary.Tasks.FailedLast24Hours}} завершились с ошибкой за сутки.</p>{{end}}
+    {{if .Report.Summary.Backup.Known}}<p><b>Резервные копии:</b> {{.Report.Summary.Backup.Count}}{{with .Report.Summary.Backup.Latest}}; последняя — {{dateTime .}}{{end}}.</p>{{end}}
+  </div>
+
+  <div style="display:grid;gap:14px;margin-top:18px">
+    {{range .Report.Checks}}
+    <section class="card" aria-labelledby="diagnostic-{{.Code}}">
+      <div class="card-header" style="flex-wrap:wrap">
+        <h2 id="diagnostic-{{.Code}}" class="card-title" style="margin:0">{{.Title}}</h2>
+        <span class="badge {{.Badge}}">{{.Label}}</span>
+      </div>
+      <p style="margin:0">{{.Detail}}</p>
+      {{if .NextStep}}<p style="margin:12px 0 0"><b>Следующий шаг:</b> {{.NextStep}}</p>{{end}}
+      {{if .Href}}<a class="btn btn-ghost" style="margin-top:12px" href="{{.Href}}">Открыть раздел</a>{{end}}
+    </section>
+    {{end}}
+  </div>
+
+  <section class="card" style="margin-top:18px" aria-labelledby="diagnostic-archive">
+    <h2 id="diagnostic-archive" class="card-title">Архив для обращения за помощью</h2>
+    <p>В ZIP входят версия, режим запуска, обезличенные количества и результаты этих проверок. Пароли, токены, настройки, журналы, IP-адреса, имена компьютеров и пользователей, почта и содержимое удалённых команд в него не входят.</p>
+    <p class="text-muted">Перед отправкой можно открыть файлы JSON и проверить содержимое. Архив скачивается на ваш компьютер; приложение никуда его не отправляет.</p>
+    <a class="btn btn-primary" href="/api/diagnostics/archive" download>Скачать архив диагностики</a>
+  </section>
+</div>
+{{end}}
+
+{{define "scripts"}}{{end}}

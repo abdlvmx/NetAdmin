@@ -1,26 +1,34 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"netadmin/internal/config"
 	"netadmin/internal/version"
 	"netadmin/internal/winsvc"
 )
 
 type serverRuntime struct {
-	ListenAddr string `json:"listen_addr"`
-	ProcessID  int    `json:"process_id"`
-	DataDir    string `json:"data_dir"`
+	PublicURL   string `json:"public_url,omitempty"`
+	TLSCertFile string `json:"tls_cert_file,omitempty"`
+	ListenAddr  string `json:"listen_addr"`
+	ProcessID   int    `json:"process_id"`
+	DataDir     string `json:"data_dir"`
 }
 
 const serverInstallGuardName = "server_install_guard.json"
@@ -45,8 +53,12 @@ func checkServerInstallDataDir(dir, actual string) error {
 	return nil
 }
 
-func saveServerRuntime(dir, listenAddr string) error {
-	b, err := json.Marshal(serverRuntime{ListenAddr: listenAddr, ProcessID: os.Getpid(), DataDir: serviceRuntimeDataDir()})
+func saveServerRuntime(dir, listenAddr string, transport ...config.TLSSettings) error {
+	live := serverRuntime{ListenAddr: listenAddr, ProcessID: os.Getpid(), DataDir: serviceRuntimeDataDir()}
+	if len(transport) > 0 && transport[0].Enabled() {
+		live.PublicURL, live.TLSCertFile = transport[0].PublicURL, transport[0].CertFile
+	}
+	b, err := json.Marshal(live)
 	if err != nil {
 		return err
 	}
@@ -106,28 +118,77 @@ func serverHealthURL(listenAddr string) (string, error) {
 }
 
 func installedServerHealthURL(dir string) (string, error) {
-	var cfg struct {
-		ListenAddr string `json:"listen_addr"`
-	}
-	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	cfg, transport, err := installedServerTransport(dir)
+	if err != nil {
 		return "", err
 	}
-	if err == nil {
-		if err := json.Unmarshal(b, &cfg); err != nil {
-			return "", fmt.Errorf("настройки установленного сервера: %w", err)
-		}
+	if transport.Enabled() {
+		return transport.PublicURL + "/healthz", nil
 	}
 	return serverHealthURL(cfg.ListenAddr)
 }
 
+func installedServerTransport(dir string) (config.Config, config.TLSSettings, error) {
+	var cfg config.Config
+	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return cfg, config.TLSSettings{}, err
+	}
+	if err == nil {
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			return cfg, config.TLSSettings{}, fmt.Errorf("настройки установленного сервера: %w", err)
+		}
+	}
+	transport, err := cfg.TLSSettingsAt(dir, false)
+	return cfg, transport, err
+}
+
 func checkServerHealth(url, expectedVersion string, expectedPID int) error {
+	return checkServerHealthTLS(url, expectedVersion, expectedPID, "", "")
+}
+
+func checkServerHealthTLS(probeURL, expectedVersion string, expectedPID int, certFile, listenAddr string) error {
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
+	if strings.HasPrefix(probeURL, "https://") && certFile != "" {
+		b, err := os.ReadFile(certFile)
+		if err != nil {
+			return err
+		}
+		block, _ := pem.Decode(b)
+		if block == nil || block.Type != "CERTIFICATE" {
+			return errors.New("неверный сертификат проверки службы")
+		}
+		leaf, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return err
+		}
+		roots := x509.NewCertPool()
+		roots.AddCert(leaf)
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+		// Verify the public certificate name while dialing the actual local
+		// listener. Installation must not depend on external DNS/NAT routing.
+		if listenAddr != "" {
+			local, err := serverHealthURL(listenAddr)
+			if err != nil {
+				return err
+			}
+			u, err := url.Parse(local)
+			if err != nil {
+				return err
+			}
+			dialer := &net.Dialer{Timeout: 2 * time.Second}
+			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return dialer.DialContext(ctx, network, u.Host)
+			}
+		}
+	}
 	client := &http.Client{
 		Timeout:       2 * time.Second,
-		Transport:     &http.Transport{Proxy: nil, DisableKeepAlives: true},
+		Transport:     transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	resp, err := client.Get(url)
+	defer transport.CloseIdleConnections()
+	resp, err := client.Get(probeURL)
 	if err != nil {
 		return err
 	}
@@ -146,11 +207,16 @@ func checkServerHealth(url, expectedVersion string, expectedPID int) error {
 }
 
 func waitInstalledServerHealth(dir, dataDir string) (string, error) {
+	cfg, transport, err := installedServerTransport(dataDir)
+	if err != nil {
+		return "", err
+	}
 	url, err := installedServerHealthURL(dataDir)
 	if err != nil {
 		return "", err
 	}
 	deadline := time.Now().Add(15 * time.Second)
+	certFile, listenAddr := transport.CertFile, cfg.ListenAddr
 	for {
 		pid, pidErr := winsvc.ProcessID(serviceName)
 		if pidErr == nil {
@@ -159,11 +225,15 @@ func waitInstalledServerHealth(dir, dataDir string) (string, error) {
 			// address reported by this SCM process in the protected directory.
 			var live serverRuntime
 			if b, readErr := os.ReadFile(filepath.Join(dir, "server_runtime.json")); readErr == nil && json.Unmarshal(b, &live) == nil && live.ProcessID == pid {
+				listenAddr, certFile = live.ListenAddr, live.TLSCertFile
 				if actualURL, addrErr := serverHealthURL(live.ListenAddr); addrErr == nil {
 					url = actualURL
+					if live.PublicURL != "" && live.TLSCertFile != "" {
+						url = live.PublicURL + "/healthz"
+					}
 				}
 			}
-			err = checkServerHealth(url, version.Value, pid)
+			err = checkServerHealthTLS(url, version.Value, pid, certFile, listenAddr)
 		} else {
 			err = pidErr
 		}

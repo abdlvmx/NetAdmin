@@ -98,6 +98,10 @@ func printDemoBanner(port string) {
 // сервер выглядел как отладочный вывод, и было неочевидно даже то, что окно
 // закрывать нельзя.
 func printServerBanner(port string, allow netaccess.List, allowSource string) {
+	printServerBannerForURL(port, allow, allowSource, "http://127.0.0.1:"+port, false)
+}
+
+func printServerBannerForURL(port string, allow netaccess.List, allowSource, panelURL string, encrypted bool) {
 	fmt.Println()
 	bannerRule()
 	fmt.Println("  NetAdmin работает")
@@ -105,10 +109,17 @@ func printServerBanner(port string, allow netaccess.List, allowSource string) {
 	fmt.Println()
 	fmt.Printf("  Версия:    %s\n", version.Full())
 	fmt.Printf("  Время:     %s\n", tz.Label())
-	fmt.Printf("  Откройте:  http://127.0.0.1:%s\n", port)
+	fmt.Printf("  Откройте:  %s\n", panelURL)
 
 	lan, public := splitAddrs()
+	if encrypted {
+		fmt.Printf("  Агентам:   %s\n", panelURL)
+		fmt.Println("  HTTPS: сертификат должен быть доверен на подключаемых ПК.")
+	}
 	for i, ip := range lan {
+		if encrypted {
+			break
+		}
 		label := "  Агентам:  "
 		if i > 0 {
 			label = "            "
@@ -124,7 +135,7 @@ func printServerBanner(port string, allow netaccess.List, allowSource string) {
 	} else {
 		fmt.Printf("  Доступ разрешён из: %s (%s)\n", allow, allowSource)
 	}
-	if allow.Unrestricted() {
+	if allow.Unrestricted() && !encrypted {
 		fmt.Println()
 		fmt.Println("  ВНИМАНИЕ: ограничение по подсетям снято, сервер обслуживает любые")
 		fmt.Println("  адреса. Канал не шифруется — так можно только в доверенной сети.")

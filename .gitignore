@@ -2,6 +2,7 @@
 /agent.exe
 /_testdata/
 /_t/
+/dist/
 *.db
 *.db-shm
 *.db-wal

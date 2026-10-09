@@ -5,6 +5,47 @@
 // надо было уходить в список устройств и обновлять его, гадая, сколько ждать.
 // Страница теперь ждёт сама и говорит, кто подключился.
 (function () {
+  // Скрипт страницы может выполняться раньше layout.js. Обе стороны сохраняют
+  // общий объект действий, поэтому выбор адреса работает при любом порядке.
+  window.actions = window.actions || {};
+
+  var page = document.getElementById('settings-page');
+  if (page) {
+    var pendingKey = 'netadmin.settings.pending.' + page.dataset.userId;
+    // После возврата формы с общей ошибкой открываем раздел, который сохраняли.
+    // В хранилище попадает только ID раздела: значения полей и ключи не сохраняются.
+    var pendingSection = '';
+    try {
+      pendingSection = sessionStorage.getItem(pendingKey) || '';
+      sessionStorage.removeItem(pendingKey);
+    } catch (_) { /* браузер может запрещать хранилище */ }
+    if (page.dataset.feedback && pendingSection) openSection(pendingSection, false);
+
+    page.addEventListener('submit', function (event) {
+      var section = event.target.closest('[data-settings-section]');
+      try {
+        if (section) sessionStorage.setItem(pendingKey, section.id);
+        else sessionStorage.removeItem(pendingKey);
+      } catch (_) { /* сохранение формы от этого не зависит */ }
+    });
+
+    function revealHash() {
+      var id;
+      try { id = decodeURIComponent(location.hash.slice(1)); }
+      catch (_) { return; }
+      openSection(id, true);
+    }
+    function openSection(id, scroll) {
+      var target = document.getElementById(id);
+      if (!target || !page.contains(target)) return;
+      var section = target.closest('[data-settings-section]');
+      if (section) section.open = true;
+      if (scroll) target.scrollIntoView({ block: 'start' });
+    }
+    window.addEventListener('hashchange', revealHash);
+    revealHash();
+  }
+
   var box = document.getElementById('agent-wait');
   if (box) {
     var base = parseInt(box.dataset.base, 10) || 0;

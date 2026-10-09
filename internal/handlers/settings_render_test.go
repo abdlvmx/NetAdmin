@@ -31,6 +31,15 @@ func TestSettingsPageShowsVersionAndRecovery(t *testing.T) {
 	}
 }
 
+func TestHTTPSSettingsKeepCertificateNameInsteadOfLANAddressPicker(t *testing.T) {
+	w := httptest.NewRecorder()
+	web.RenderPage(w, "settings", settingsData{User: &auth.User{ID: 1, Username: "admin", Role: "admin"}, HTTPS: true, HTTPSAgentURL: "https://panel.example.test:8765"})
+	body := w.Body.String()
+	if strings.Contains(body, "template error") || !strings.Contains(body, "https://panel.example.test:8765") || strings.Contains(body, `data-act-change="pickHost"`) {
+		t.Fatal("HTTPS settings replaced certificate name with LAN picker")
+	}
+}
+
 // Часовой пояс выбирается списком, а не набирается руками: «Asia/Krasnoyarsk»
 // с опечаткой в одну букву даёт отказ, причину которого искать негде.
 func TestSettingsShowsTimezoneChoice(t *testing.T) {
@@ -60,5 +69,71 @@ func TestSettingsShowsTimezoneChoice(t *testing.T) {
 	// Смещения считаются, а не вписаны в разметку: закон их меняет.
 	if !strings.Contains(body, "Москва, Санкт-Петербург — UTC") {
 		t.Error("у пояса не показано смещение")
+	}
+}
+
+// Разделы скрывают подробности, но не отключают поля: сохранение раскрытой
+// формы должно по-прежнему отправлять реальные текущие настройки.
+func TestSettingsSectionsPreserveConfiguredValues(t *testing.T) {
+	rec := httptest.NewRecorder()
+	web.RenderPage(rec, "settings", settingsData{
+		User:              &auth.User{ID: 42, Username: "admin", Role: "admin"},
+		OrgName:           "Тестовая организация",
+		AgentToken:        "current-token",
+		ListenAddr:        "127.0.0.1:9012",
+		AllowSubnets:      "192.168.40.0/24",
+		SMTPHost:          "mail.example.test",
+		SMTPPort:          465,
+		SMTPUser:          "mailer",
+		ScanIntervalHours: 12,
+		HelpdeskEnabled:   true,
+		BackupKeep:        9,
+		BackupDir:         `D:\Backups`,
+	})
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="settings-organization"`, `id="settings-agents"`, `id="settings-backup"`,
+		`id="settings-notifications" data-settings-section>`,
+		`id="settings-network" data-settings-section>`,
+		`name="listen_addr" value="127.0.0.1:9012"`,
+		`name="allow_subnets" value="192.168.40.0/24"`,
+		`name="smtp_host" value="mail.example.test"`,
+		`name="smtp_port" type="number" value="465"`,
+		`name="scan_interval_hours" min="0" max="168" value="12"`,
+		`name="helpdesk_enabled" value="1" style="width:auto" checked`,
+		`name="keep" min="0" max="365" value="9"`,
+		`name="dir" value="D:\Backups"`,
+		`value="current-token"`, `href="/settings/diagnostics"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("настройки потеряли поле или действие %q", want)
+		}
+	}
+	if basic, additional := strings.Index(body, `id="settings-backup"`), strings.Index(body, `id="settings-additional"`); basic < 0 || additional <= basic {
+		t.Error("резервные копии должны быть видны среди основных настроек")
+	}
+}
+
+func TestSettingsReopensSectionAfterFeedback(t *testing.T) {
+	for _, tc := range []struct{ message, problem, section string }{
+		{"notifications_saved", "", "notifications"},
+		{"test_sent", "", "notifications"},
+		{"", "test_failed", "notifications"},
+		{"helpdesk_saved", "", "helpdesk"},
+		{"scan_saved", "", "scan"},
+		{"network_saved", "", "network"},
+		{"agent_token_rotated", "", "token"},
+	} {
+		t.Run(tc.section+tc.message+tc.problem, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			web.RenderPage(rec, "settings", settingsData{
+				User:    &auth.User{ID: 1, Username: "admin", Role: "admin"},
+				Message: tc.message,
+				Error:   tc.problem,
+			})
+			if want := `id="settings-` + tc.section + `" data-settings-section open>`; !strings.Contains(rec.Body.String(), want) {
+				t.Errorf("после сохранения/ошибки раздел должен оставаться открытым: %s", want)
+			}
+		})
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"netadmin/internal/edition"
 )
 
 func readAll(t *testing.T, resp *http.Response) string {
@@ -33,6 +35,10 @@ func getStatus(t *testing.T, srv *httptest.Server, path string) int {
 // в packages — как это делает загрузка файла на странице «Установка ПО».
 func addAgentBuild(t *testing.T, a *App, original, content, sha string) {
 	t.Helper()
+	// This fixture tests bytes/selection separately from real Go metadata.
+	previousProbe := readAgentEdition
+	readAgentEdition = func(string) (string, error) { return edition.ID, nil }
+	t.Cleanup(func() { readAgentEdition = previousProbe })
 	stored := randToken() + ".exe"
 	if err := os.WriteFile(filepath.Join(packagesDir(), stored), []byte(content), 0o600); err != nil {
 		t.Fatalf("запись дистрибутива: %v", err)

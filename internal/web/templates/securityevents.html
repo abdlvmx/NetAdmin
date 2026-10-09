@@ -1,0 +1,117 @@
+{{define "title"}}Events{{end}}
+{{define "extra_head"}}
+<style>
+.events-policy{display:grid;gap:8px;max-width:440px;padding:12px 0}.events-policy label{display:flex;gap:8px;align-items:flex-start;font-size:12px}.events-policy input[type=checkbox]{flex:none;margin-top:3px}.events-fields{white-space:pre-wrap;overflow-wrap:anywhere;max-width:480px;font-size:11px}.events-filter{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}.events-filter label{display:grid;gap:4px;font-size:12px}.events-health{margin-top:5px;font-size:12px;overflow-wrap:anywhere}.events-status{min-width:190px}
+.events-summary{max-width:420px;white-space:normal;overflow-wrap:anywhere}.events-rule-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:18px}.events-rule-form{display:grid;gap:10px}.events-rule-form label{display:grid;gap:4px}.events-rule-form .check-label{display:flex;align-items:center;gap:8px}.events-data{display:grid;gap:5px;white-space:normal;overflow-wrap:anywhere;max-width:480px}
+.events-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}.events-tabs a{display:inline-flex;align-items:center;padding:10px 14px;border:1px solid var(--border);border-radius:8px;text-decoration:none;font-weight:600;color:var(--text)}.events-tabs a[aria-current=page]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}.events-subtabs a{padding:7px 12px;font-size:12px}.events-rule-form>label{min-width:0}.events-rule-form select{max-width:100%}
+</style>
+{{end}}
+{{define "content"}}
+<div class="topbar"><div><h1>Events</h1><div class="sub">Наблюдение за журналами Windows · хранение 7 дней · сбор включается отдельно для каждого ПК</div></div><div class="datechip">{{today}}</div></div>
+<div class="content" data-events-tab="{{.Tab}}">
+<nav class="events-tabs" aria-label="Разделы Events">
+<a href="{{.Navigation.Findings}}" {{if eq .Tab "findings"}}aria-current="page"{{end}}>Обнаружения</a>
+<a href="{{.Navigation.Logs}}" {{if eq .Tab "logs"}}aria-current="page"{{end}}>Журнал</a>
+<a href="{{.Navigation.Collection}}" {{if eq .Tab "collection"}}aria-current="page"{{end}}>Сбор</a>
+<a href="{{.Navigation.Rules}}" {{if or (eq .Tab "rules") (eq .Tab "backups")}}aria-current="page"{{end}}>Настройки</a>
+</nav>
+{{if or (eq .Tab "rules") (eq .Tab "backups")}}<nav class="events-tabs events-subtabs" aria-label="Настройки Events">
+<a href="{{.Navigation.Rules}}" {{if eq .Tab "rules"}}aria-current="page"{{end}}>Правила и исключения</a>
+<a href="{{.Navigation.Backups}}" {{if eq .Tab "backups"}}aria-current="page"{{end}}>Резервные копии</a>
+</nav>{{end}}
+{{if .Msg}}<div class="banner">{{.Msg}}</div>{{end}}
+{{if .Demo}}<div class="banner">В демонстрационном режиме сбор и изменение настроек Events отключены.</div>{{else if not .HTTPS}}<div class="banner">Для включения сбора настройте собственный HTTPS сервера и откройте панель по HTTPS. <a href="/settings">Настройки сервера</a></div>{{end}}
+{{if eq .Tab "collection"}}<section id="events-delivery" class="card" style="margin-bottom:18px" aria-labelledby="delivery-title">
+<div class="card-header"><h2 id="delivery-title" class="card-title">Контроль доставки</h2><a href="{{.Navigation.Backups}}">Резервные копии</a></div>
+<p class="text-muted">Связь проверяется по запросам Events, а не по наличию новых событий. Ожидание агента — 3 минуты, задержка очереди — 10 минут. Состояние обновляется при открытии страницы.</p>
+{{range .DeliveryProblems}}<div class="events-health" style="margin-bottom:12px"><a href="#events-device-{{.ID}}"><b>{{.Hostname}}</b></a> · <span class="badge {{if eq .Health.Level "error"}}badge-red{{else}}badge-amber{{end}}">{{.Health.Title}}</span><div>{{.Health.Detail}}</div><div class="text-muted">{{.Health.NextStep}}</div></div>
+{{else}}<p>Проблем доставки для включённых ПК не обнаружено. Состояние каждого ПК показано ниже.</p>{{end}}
+</section>{{end}}
+{{if eq .Tab "findings"}}<section class="card" style="margin-bottom:18px" aria-labelledby="findings-title">
+<div class="card-header"><h2 id="findings-title" class="card-title">Обнаружения для разбора</h2><a href="{{.Navigation.Rules}}">Правила и исключения</a></div>
+<p class="text-muted">Карточки создаются по новым событиям. Повторы объединяются; сигнал требует проверки администратором. Автоматических действий на ПК нет.</p>
+<form method="get" action="/events" class="toolbar events-filter">
+<input type="hidden" name="tab" value="findings">
+<label>ПК<select name="device"><option value="0">Все ПК</option>{{range .Devices}}<option value="{{.ID}}" {{if eq $.DeviceID .ID}}selected{{end}}>{{.Hostname}}</option>{{end}}</select></label>
+<input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="from" value="{{.From}}"><input type="hidden" name="to" value="{{.To}}">
+<label>Состояние<select name="finding_status"><option value="active" {{if eq .FindingStatus "active"}}selected{{end}}>Новые и разбираемые</option><option value="all" {{if eq .FindingStatus "all"}}selected{{end}}>Все</option><option value="new" {{if eq .FindingStatus "new"}}selected{{end}}>Новое</option><option value="in_progress" {{if eq .FindingStatus "in_progress"}}selected{{end}}>Разбирается</option><option value="closed" {{if eq .FindingStatus "closed"}}selected{{end}}>Закрыто</option><option value="false_positive" {{if eq .FindingStatus "false_positive"}}selected{{end}}>Ложное срабатывание</option></select></label>
+<label>Правило<select name="rule"><option value="">Все правила</option>{{range .Rules}}<option value="{{.ID}}" {{if eq $.RuleFilter .ID}}selected{{end}}>{{.Title}}</option>{{end}}</select></label><button class="btn btn-ghost btn-sm">Показать</button>
+</form>
+<div class="table-wrap"><table id="events-findings"><thead><tr><th>Обнаружение / ПК</th><th>Важность</th><th>События</th><th>Состояние / ответственный</th><th>Последнее событие</th></tr></thead><tbody>
+{{range .Findings}}<tr><td class="events-summary"><a href="/events/findings/{{.ID}}"><b>{{.Title}}</b></a><div>{{.Hostname}}</div><div class="text-muted">{{.Summary}}</div></td><td><span class="badge {{if eq .Severity "high"}}badge-red{{else if eq .Severity "medium"}}badge-yellow{{else}}badge-gray{{end}}">{{.SeverityLabel}}</span></td><td>{{.EventCount}}</td><td>{{.StateLabel}}<div class="text-muted">{{.AssigneeName}}</div></td><td>{{dateTime .LastEvent}}</td></tr>
+{{else}}<tr><td colspan="5" class="empty">Карточек по выбранным фильтрам нет. <a href="{{.Navigation.Collection}}">Проверить и настроить сбор</a></td></tr>{{end}}
+</tbody></table></div></section>{{end}}
+{{if eq .Tab "collection"}}<div class="card" style="margin-bottom:18px">
+<div class="card-header"><span class="card-title">Компьютеры и состояние сбора</span></div>
+<div class="table-wrap"><table id="events-devices"><thead><tr><th>ПК</th><th>Профиль и согласие</th><th>Состояние агента</th><th>Доставка</th></tr></thead><tbody>
+{{range .Devices}}<tr id="events-device-{{.ID}}">
+<td><a href="/devices/{{.ID}}"><b>{{.Hostname}}</b></a><div class="text-muted">{{.IP}}</div>
+{{if not .Enrolled}}<div class="events-health">Агент не зарегистрирован</div>{{else if not .Supported}}<div class="events-health">Сбор событий не поддерживается — установите агент NetAdmin Events</div>{{end}}
+{{if .RegistrationChanged}}<div class="events-health text-red">Регистрация агента изменилась. Для сбора требуется новое согласие администратора.</div>{{end}}</td>
+<td><span class="badge {{if .Policy.Enabled}}badge-green{{else}}badge-gray{{end}}">{{if .Policy.Enabled}}Включён{{else}}Выключен{{end}}</span> {{if eq .Policy.Profile "security"}}System + Security{{else}}System{{end}}
+<details><summary>Настроить сбор</summary>
+<form id="events-policy-{{.ID}}" class="events-policy" method="post" action="/events/devices/{{.ID}}/policy">
+<select name="profile" aria-label="Профиль Events"><option value="system" {{if ne .Policy.Profile "security"}}selected{{end}}>System</option><option value="security" {{if eq .Policy.Profile "security"}}selected{{end}}>System + Security</option></select>
+<label><input type="checkbox" name="enabled" value="1" {{if .Policy.Enabled}}checked{{end}} {{if not .CanEnable}}disabled{{end}}>Включить сбор для этого ПК</label>
+<label><input type="checkbox" name="consent" value="1">Я разрешаю сбор выбранных событий Windows и их отправку на этот сервер</label>
+<label><input type="checkbox" name="security_privacy" value="1">Для профиля Security: я разрешаю обработку имени и домена целевой учётной записи, IP-адреса, типа входа и кодов отказа из выбранных событий журнала</label>
+<div class="text-muted">После выключения агент очищает локальную очередь и закладки; сохранённые на сервере события удаляются по сроку хранения.</div>
+<button class="btn btn-primary btn-sm" {{if $.Demo}}disabled{{end}}>Сохранить</button></form></details></td>
+<td class="events-status">Последний отчёт: {{.StateLabel}}{{if .Status.Error}}<div class="events-health text-red">{{.Status.Error}}</div>{{end}}
+{{range .Channels}}<div class="events-health"><b>{{.Channel}}</b>: {{.State}}{{if .Error}} · {{.Error}}{{end}}</div>{{end}}
+{{if not .Status.LastCollected.IsZero}}<div class="events-health text-muted">Собрано: {{dateTime .Status.LastCollected}}</div>{{end}}</td>
+<td class="events-summary"><span class="badge {{if eq .Health.Level "ok"}}badge-green{{else if eq .Health.Level "error"}}badge-red{{else if eq .Health.Level "warning"}}badge-amber{{else}}badge-gray{{end}}">{{.Health.Title}}</span><div class="events-health">{{.Health.Detail}}</div>
+<div class="events-health">Пропущено за регистрацию: {{.Status.Dropped}} · Очередь: {{sizeMB .Status.QueueBytes}}</div><div class="events-health text-muted">Последняя связь Events: {{if .Status.LastContact.IsZero}}—{{else}}{{dateTime .Status.LastContact}}{{end}}</div><div class="events-health text-muted">Последний сохранённый пакет: {{if .Status.LastReceived.IsZero}}—{{else}}{{dateTime .Status.LastReceived}}{{end}}</div></td>
+</tr>{{else}}<tr><td colspan="4" class="empty">Компьютеров пока нет. Добавьте ПК в инвентарь и зарегистрируйте агент NetAdmin Events.</td></tr>{{end}}
+</tbody></table></div></div>{{end}}
+{{if eq .Tab "logs"}}<div class="card" style="margin-bottom:18px"><div class="card-header"><span class="card-title">Последние события · до 100 записей</span></div>
+<form method="get" action="/events" class="toolbar events-filter">
+<input type="hidden" name="tab" value="logs"><input type="hidden" name="finding_status" value="{{.FindingStatus}}"><input type="hidden" name="rule" value="{{.RuleFilter}}">
+<label>ПК<select name="device"><option value="0">Все ПК</option>{{range .Devices}}<option value="{{.ID}}" {{if eq $.DeviceID .ID}}selected{{end}}>{{.Hostname}}</option>{{end}}</select></label>
+<label>Канал<select name="channel"><option value="">Все каналы</option><option value="System" {{if eq .Channel "System"}}selected{{end}}>System</option><option value="Security" {{if eq .Channel "Security"}}selected{{end}}>Security</option></select></label>
+<label>От (UTC)<input type="datetime-local" name="from" value="{{.From}}"></label><label>До (UTC)<input type="datetime-local" name="to" value="{{.To}}"></label><button class="btn btn-ghost btn-sm">Применить</button><a href="/events?tab=logs">Сбросить</a>
+</form>
+<div class="table-wrap"><table id="events-recent"><thead><tr><th>Время / ПК</th><th>Что произошло</th><th>Канал / запись</th><th>Подробности</th></tr></thead><tbody>
+{{range .Events}}<tr><td>{{dateTime .TimeUTC}}<div>{{.Hostname}}</div></td><td class="events-summary"><b>{{.Title}}</b><div class="text-muted">{{.Summary}}</div></td><td>{{.Channel}}<div>{{.EventID}} / {{.RecordID}}</div></td><td><div class="events-data">{{range .EventDescription.Fields}}<div><span class="text-muted">{{.Label}}:</span> {{.Value}}</div>{{end}}</div><details><summary>Технические данные</summary><pre class="events-fields">{{.JSON}}</pre></details></td></tr>{{else}}<tr><td colspan="4" class="empty">Событий по выбранным фильтрам нет.</td></tr>{{end}}
+</tbody></table></div></div>
+<div class="card"><div class="card-header"><span class="card-title">Разрывы чтения журналов</span></div><div class="table-wrap"><table><thead><tr><th>Получено</th><th>ПК</th><th>Канал</th><th>Причина</th></tr></thead><tbody>
+{{range .Gaps}}<tr><td>{{dateTime .TimeUTC}}</td><td>{{.Hostname}}</td><td>{{.Channel}}</td><td title="{{.Reason}}">{{.ReasonLabel}}</td></tr>{{else}}<tr><td colspan="4" class="empty">Разрывов чтения по выбранным фильтрам нет.</td></tr>{{end}}
+</tbody></table></div></div>{{end}}
+{{if eq .Tab "rules"}}<section id="events-rules" class="card" aria-labelledby="events-rules-title">
+<div class="card-header"><h2 id="events-rules-title" class="card-title">Правила и временные исключения</h2></div>
+<p class="text-muted">Изменение правила начинает новый интервал накопления; прошлые события не пересчитываются. Карточки сохраняют параметры, при которых они появились. Исключения действуют только на новые события и не удаляют сами журналы.</p>
+<details open><summary>Настроить правила</summary><div class="events-rule-grid" style="margin-top:16px">
+{{range .Rules}}<div id="rule-{{.ID}}"><h3>{{.Title}}</h3><p class="text-muted">{{.Explanation}}</p>
+<form id="events-rule-{{.ID}}" method="post" action="/events/rules/{{.ID}}" class="events-rule-form">
+<input type="hidden" name="revision" value="{{.Revision}}"><label class="check-label"><input type="checkbox" name="enabled" value="1" {{if .Enabled}}checked{{end}}>Правило включено</label>
+{{if eq .ID "failed_logons"}}<label>Порог событий<input type="number" name="threshold" min="1" max="100" value="{{.Threshold}}" required></label>{{else}}<input type="hidden" name="threshold" value="1">{{end}}
+<label>{{if eq .ID "failed_logons"}}Интервал подсчёта{{else}}Интервал объединения{{end}}, минут<input type="number" name="window" min="1" max="120" value="{{.WindowMinutes}}" required></label><button class="btn btn-primary btn-sm" {{if $.Demo}}disabled{{end}}>Сохранить правило</button></form>
+<details style="margin-top:14px"><summary>Добавить временное исключение</summary><form method="post" action="/events/rules/{{.ID}}/exceptions" class="events-rule-form" style="margin-top:10px">
+<label>ПК<select name="device"><option value="0">Все ПК</option>{{range $.Devices}}{{if .Enrolled}}<option value="{{.ID}}">{{.Hostname}}</option>{{end}}{{end}}</select></label>
+<label>Сопоставлять<select name="scope">{{if eq .ID "failed_logons"}}<option value="account">Учётную запись (ДОМЕН\имя либо имя)</option><option value="ip">IP источника</option>{{else if eq .ID "service_installed"}}<option value="service">Имя службы</option>{{else}}<option value="channel">Очищенный канал</option>{{end}}</select></label>
+<label>Точное значение<input name="value" maxlength="512" required></label><label>Срок, часов (1–168)<input type="number" name="hours" min="1" max="168" value="24" required></label><label>Причина<input name="reason" maxlength="500" required></label><button class="btn btn-ghost btn-sm" {{if $.Demo}}disabled{{end}}>Добавить исключение</button></form></details>
+</div>{{end}}</div></details>
+<div class="table-wrap" style="margin-top:18px"><table id="events-exceptions"><thead><tr><th>Правило / ПК</th><th>Точное значение</th><th>Действует до</th><th>Причина</th><th></th></tr></thead><tbody>
+{{range .Exceptions}}<tr><td>{{.RuleTitle}}<div class="text-muted">{{.Hostname}}</div></td><td class="events-summary">{{.ScopeLabel}}: {{.Value}}</td><td>{{dateTime .ExpiresAt}}</td><td class="events-summary">{{.Reason}}</td><td><form method="post" action="/events/exceptions/{{.ID}}/delete"><button class="btn btn-ghost btn-sm" {{if $.Demo}}disabled{{end}}>Удалить</button></form></td></tr>{{else}}<tr><td colspan="5" class="empty">Действующих исключений нет.</td></tr>{{end}}
+</tbody></table></div></section>{{end}}
+{{if eq .Tab "backups"}}<section id="events-backups" class="card" aria-labelledby="events-backup-title">
+<div class="card-header"><h2 id="events-backup-title" class="card-title">Резервные копии Events</h2><a href="/settings#settings-backup">Настроить расписание</a></div>
+<p class="text-muted">Сохраняются события, карточки, комментарии, правила и исключения. Копии создаются отдельно от базы учёта в подкаталоге events каталога резервных копий. Каждая новая копия проверяется перед сохранением.</p>
+<p>{{if .Backup.Scheduled}}По расписанию: каждые {{.Backup.Interval}} ч.{{else}}Расписание выключено.{{end}} {{if .Backup.Keep}}Хранить последних копий: {{.Backup.Keep}}.{{else}}Количество копий не ограничено настройкой.{{end}}</p>
+{{if .Backup.Problem}}<div class="banner">{{.Backup.Problem}}</div>{{end}}
+{{if .Backup.Pending}}<div class="banner">Подготовлено восстановление Events при следующем запуске сервера. Сбор будет выключен для всех ПК; потребуется повторное включение.
+<form method="post" action="/events/backups/cancel" style="margin-top:10px"><button class="btn btn-ghost btn-sm" {{if .Demo}}disabled{{end}}>Отменить восстановление</button></form></div>{{end}}
+<form method="post" action="/events/backups/now" style="margin:14px 0"><button class="btn btn-primary btn-sm" {{if .Demo}}disabled{{end}}>Создать копию Events</button></form>
+<div class="table-wrap"><table id="events-backup-list"><thead><tr><th>Копия</th><th>Создана</th><th>Размер</th><th>Проверка</th></tr></thead><tbody>
+{{range .Backup.Copies}}<tr><td class="events-summary">{{.Name}}</td><td>{{dateTime .Created}}</td><td>{{sizeMB .Size}}</td><td><form method="post" action="/events/backups/verify"><input type="hidden" name="name" value="{{.Name}}"><button class="btn btn-ghost btn-sm" {{if $.Demo}}disabled{{end}}>Проверить копию</button></form></td></tr>{{else}}<tr><td colspan="4" class="empty">Копий Events пока нет.</td></tr>{{end}}
+</tbody></table></div>
+{{if gt .Backup.TotalCopies 100}}<p class="text-muted">Показаны 100 последних копий из {{.Backup.TotalCopies}}. Остальные остаются в каталоге; их хранение задаётся расписанием.</p>{{end}}
+{{if .Backup.Copies}}<details style="margin-top:14px"><summary>Восстановить Events из копии</summary>
+<p>После перезапуска данные Events будут заменены выбранной копией. Основная база учёта не меняется. Прежняя база Events сохраняется рядом с рабочей для отката. События и карточки старше срока хранения будут удалены при запуске.</p>
+<form id="events-restore" method="post" action="/events/backups/restore" class="events-rule-form">
+<label>Копия<select name="name">{{range .Backup.Copies}}<option value="{{.Name}}">{{.Name}}</option>{{end}}</select></label>
+<label class="check-label"><input type="checkbox" name="confirm" value="1" required>Подтверждаю замену данных Events и повторное включение сбора после перезапуска</label>
+<button class="btn btn-ghost btn-sm" {{if .Demo}}disabled{{end}}>Подготовить восстановление</button></form></details>{{end}}
+</section>{{end}}
+</div>{{end}}
+{{define "scripts"}}<script src="/static/securityevents.js" defer></script>{{end}}

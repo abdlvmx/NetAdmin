@@ -60,6 +60,26 @@ func (a *App) UpdateNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := config.Load()
+	transport, err := cfg.TLSSettingsAt(config.DataDir(), true)
+	if err != nil {
+		settingsError(w, r, "Настройки HTTPS: "+err.Error())
+		return
+	}
+	if transport.Enabled() {
+		oldAddr, newAddr := cfg.ListenAddr, addr
+		if oldAddr == "" {
+			oldAddr = "0.0.0.0:8765"
+		}
+		if newAddr == "" {
+			newAddr = "0.0.0.0:8765"
+		}
+		_, oldPort, _ := net.SplitHostPort(oldAddr)
+		_, newPort, _ := net.SplitHostPort(newAddr)
+		if oldPort != newPort {
+			settingsError(w, r, "При HTTPS меняйте порт в config.json вместе с public_url и адресами агентов, затем перезапускайте сервер.")
+			return
+		}
+	}
 	cfg.ListenAddr, cfg.AllowSubnets = addr, allowSpec
 	if err := config.Save(cfg); err != nil {
 		settingsError(w, r, "Не удалось сохранить настройки: "+err.Error())
@@ -210,6 +230,9 @@ func (a *App) InstallLocalAgent(w http.ResponseWriter, r *http.Request) {
 
 // localServerURL — адрес сервера для агента на этой же машине.
 func localServerURL(r *http.Request) string {
+	if r.TLS != nil {
+		return agentServerURL(r)
+	}
 	_, port, err := net.SplitHostPort(r.Host)
 	if err != nil {
 		return "http://127.0.0.1:8765"

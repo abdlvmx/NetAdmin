@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	"netadmin/internal/auth"
 	"netadmin/internal/config"
+	"netadmin/internal/edition"
 	"netadmin/internal/tz"
 	"netadmin/internal/web"
 )
@@ -279,6 +281,10 @@ func (a *App) DeployAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/packages?error=У+сборки+нет+контрольной+суммы", http.StatusSeeOther)
 		return
 	}
+	if binaryEdition, err := readAgentEdition(filepath.Join(packagesDir(), p.Filename)); err != nil || binaryEdition != edition.ID {
+		http.Redirect(w, r, "/packages?error="+url.QueryEscape("Выберите agent.exe той же редакции, что сервер. Смена редакции выполняется переустановкой, а не самообновлением."), http.StatusSeeOther)
+		return
+	}
 
 	targets := a.agentDeviceIDs()
 	if len(targets) == 0 {
@@ -328,7 +334,7 @@ func (a *App) AgentPackageDownload(w http.ResponseWriter, r *http.Request) {
 	// каталог ПО по перебору идентификаторов.
 	var allowed int
 	a.DB.QueryRow(`SELECT 1 FROM agent_tasks
-		WHERE device_id=? AND package_id=? AND status IN ('pending','sent') LIMIT 1`,
+		WHERE device_id=? AND package_id=? AND status IN ('pending','sent','running') LIMIT 1`,
 		ag.DeviceID, id).Scan(&allowed)
 	if allowed != 1 {
 		http.Error(w, "package not assigned", http.StatusForbidden)
