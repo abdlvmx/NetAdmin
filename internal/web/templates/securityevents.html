@@ -12,15 +12,17 @@
 <nav class="events-tabs" aria-label="Разделы Events">
 <a href="{{.Navigation.Findings}}" {{if eq .Tab "findings"}}aria-current="page"{{end}}>Обнаружения</a>
 <a href="{{.Navigation.Logs}}" {{if eq .Tab "logs"}}aria-current="page"{{end}}>Журнал</a>
+{{if .User.IsAdmin}}
 <a href="{{.Navigation.Collection}}" {{if eq .Tab "collection"}}aria-current="page"{{end}}>Сбор</a>
 <a href="{{.Navigation.Rules}}" {{if or (eq .Tab "rules") (eq .Tab "backups")}}aria-current="page"{{end}}>Настройки</a>
+{{end}}
 </nav>
 {{if or (eq .Tab "rules") (eq .Tab "backups")}}<nav class="events-tabs events-subtabs" aria-label="Настройки Events">
 <a href="{{.Navigation.Rules}}" {{if eq .Tab "rules"}}aria-current="page"{{end}}>Правила и исключения</a>
 <a href="{{.Navigation.Backups}}" {{if eq .Tab "backups"}}aria-current="page"{{end}}>Резервные копии</a>
 </nav>{{end}}
 {{if .Msg}}<div class="banner">{{.Msg}}</div>{{end}}
-{{if .Demo}}<div class="banner">В демонстрационном режиме сбор и изменение настроек Events отключены.</div>{{else if not .HTTPS}}<div class="banner">Для включения сбора настройте собственный HTTPS сервера и откройте панель по HTTPS. <a href="/settings">Настройки сервера</a></div>{{end}}
+{{if .Demo}}<div class="banner">В демонстрационном режиме сбор и изменение настроек Events отключены.</div>{{else if and .User.IsAdmin (not .HTTPS)}}<div class="banner">Для включения сбора настройте собственный HTTPS сервера и откройте панель по HTTPS. <a href="/settings">Настройки сервера</a></div>{{end}}
 {{if eq .Tab "collection"}}<section id="events-delivery" class="card" style="margin-bottom:18px" aria-labelledby="delivery-title">
 <div class="card-header"><h2 id="delivery-title" class="card-title">Контроль доставки</h2><a href="{{.Navigation.Backups}}">Резервные копии</a></div>
 <p class="text-muted">Связь проверяется по запросам Events, а не по наличию новых событий. Ожидание агента — 3 минуты, задержка очереди — 10 минут. Состояние обновляется при открытии страницы.</p>
@@ -28,8 +30,8 @@
 {{else}}<p>Проблем доставки для включённых ПК не обнаружено. Состояние каждого ПК показано ниже.</p>{{end}}
 </section>{{end}}
 {{if eq .Tab "findings"}}<section class="card" style="margin-bottom:18px" aria-labelledby="findings-title">
-<div class="card-header"><h2 id="findings-title" class="card-title">Обнаружения для разбора</h2><a href="{{.Navigation.Rules}}">Правила и исключения</a></div>
-<p class="text-muted">Карточки создаются по новым событиям. Повторы объединяются; сигнал требует проверки администратором. Автоматических действий на ПК нет.</p>
+<div class="card-header"><h2 id="findings-title" class="card-title">Обнаружения для разбора</h2>{{if .User.IsAdmin}}<a href="{{.Navigation.Rules}}">Правила и исключения</a>{{end}}</div>
+<p class="text-muted">Карточки создаются по новым событиям. Повторы объединяются; сигнал требует проверки специалистом. Автоматических действий на ПК нет.</p>
 <form method="get" action="/events" class="toolbar events-filter">
 <input type="hidden" name="tab" value="findings">
 <label>ПК<select name="device"><option value="0">Все ПК</option>{{range .Devices}}<option value="{{.ID}}" {{if eq $.DeviceID .ID}}selected{{end}}>{{.Hostname}}</option>{{end}}</select></label>
@@ -39,7 +41,7 @@
 </form>
 <div class="table-wrap"><table id="events-findings"><thead><tr><th>Обнаружение / ПК</th><th>Важность</th><th>События</th><th>Состояние / ответственный</th><th>Последнее событие</th></tr></thead><tbody>
 {{range .Findings}}<tr><td class="events-summary"><a href="/events/findings/{{.ID}}"><b>{{.Title}}</b></a><div>{{.Hostname}}</div><div class="text-muted">{{.Summary}}</div></td><td><span class="badge {{if eq .Severity "high"}}badge-red{{else if eq .Severity "medium"}}badge-yellow{{else}}badge-gray{{end}}">{{.SeverityLabel}}</span></td><td>{{.EventCount}}</td><td>{{.StateLabel}}<div class="text-muted">{{.AssigneeName}}</div></td><td>{{dateTime .LastEvent}}</td></tr>
-{{else}}<tr><td colspan="5" class="empty">Карточек по выбранным фильтрам нет. <a href="{{.Navigation.Collection}}">Проверить и настроить сбор</a></td></tr>{{end}}
+{{else}}<tr><td colspan="5" class="empty">Карточек по выбранным фильтрам нет. {{if .User.IsAdmin}}<a href="{{.Navigation.Collection}}">Проверить и настроить сбор</a>{{else}}Настройку сбора выполняет администратор.{{end}}</td></tr>{{end}}
 </tbody></table></div></section>{{end}}
 {{if eq .Tab "collection"}}<div class="card" style="margin-bottom:18px">
 <div class="card-header"><span class="card-title">Компьютеры и состояние сбора</span></div>

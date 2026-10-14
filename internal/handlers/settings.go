@@ -470,13 +470,10 @@ func (a *App) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "hash error", http.StatusInternalServerError)
 		return
 	}
-	a.DB.Exec("UPDATE users SET password_hash=? WHERE id=?", newHash, user.ID)
-	// разлогинить остальные сессии
-	curToken := ""
-	if c, err := r.Cookie("session"); err == nil {
-		curToken = c.Value
+	if err := auth.UpdatePassword(a.DB, user.ID, hash, newHash, sessionCookieValue(r)); err != nil {
+		http.Error(w, "Пароль не изменён. Обновите страницу и повторите действие.", http.StatusServiceUnavailable)
+		return
 	}
-	a.DB.Exec("DELETE FROM sessions WHERE user_id=? AND token != ?", user.ID, curToken)
 	auth.LogAction(a.DB, user.ID, "change_password", user.Username, "")
 	http.Redirect(w, r, "/profile?message=password_changed", http.StatusSeeOther)
 }

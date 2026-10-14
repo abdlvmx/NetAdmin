@@ -58,6 +58,7 @@ type FindingDetails struct {
 	Comments []FindingComment
 }
 type FindingFilter struct {
+	DeviceIDs      []int64 // nil is unrestricted; a non-nil empty list matches none.
 	DeviceID       int64
 	RuleID, Status string
 	Limit          int
@@ -455,6 +456,10 @@ func (s *Store) Findings(ctx context.Context, filter FindingFilter) ([]Finding, 
 	} else if filter.Status != "all" {
 		query += ` AND status=?`
 		args = append(args, filter.Status)
+	}
+	query, args, err := appendDeviceScope(query, args, filter.DeviceIDs)
+	if err != nil {
+		return nil, err
 	}
 	limit := filter.Limit
 	if limit <= 0 {

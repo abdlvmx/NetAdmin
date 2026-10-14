@@ -145,16 +145,11 @@ func eventsFilterTime(value string) (time.Time, error) {
 	return time.Parse(time.RFC3339, value)
 }
 
-// SecurityEventsPage is intentionally restricted to administrators even if
-// the separate store has not started or cannot be opened.
+// Analysts may read findings and logs. Collection and settings remain admin-only.
 func (a *App) SecurityEventsPage(w http.ResponseWriter, r *http.Request) {
 	user := auth.CurrentUser(a.DB, r)
-	if !user.IsAdmin() {
+	if !user.CanAnalyzeEvents() {
 		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-	if a.Events == nil {
-		http.Error(w, "Events unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	q := r.URL.Query()
@@ -166,6 +161,14 @@ func (a *App) SecurityEventsPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Неизвестный раздел Events", http.StatusBadRequest)
 		return
 	}
+	if !user.IsAdmin() && data.Tab != "findings" && data.Tab != "logs" {
+		http.Error(w, "Управление Events доступно только администратору", http.StatusForbidden)
+		return
+	}
+	if a.Events == nil {
+		http.Error(w, "Events unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	data.Navigation = eventsNavigationFor(q)
 	if raw := q.Get("device"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
@@ -174,6 +177,10 @@ func (a *App) SecurityEventsPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data.DeviceID = id
+	}
+	if a.scope != nil && data.DeviceID > 0 && !a.scopedDeviceAllowed(data.DeviceID) {
+		http.NotFound(w, r)
+		return
 	}
 	if data.Channel != "" && data.Channel != "System" && data.Channel != "Security" {
 		http.Error(w, "invalid channel filter", http.StatusBadRequest)
@@ -187,7 +194,7 @@ func (a *App) SecurityEventsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.DB.QueryContext(r.Context(), `SELECT id,hostname,COALESCE(ip_address,''),COALESCE(agent_token,''),
 		COALESCE(agent_capabilities,''),COALESCE(device_type,''),COALESCE(os_type,''),COALESCE(manufacturer,''),COALESCE(open_ports,'')
-		FROM devices ORDER BY hostname,id`)
+		FROM devices WHERE `+a.deviceScopeSQL("devices.id")+` ORDER BY hostname,id`)
 	if err != nil {
 		http.Error(w, "devices unavailable", http.StatusServiceUnavailable)
 		return
@@ -245,7 +252,12 @@ func (a *App) SecurityEventsPage(w http.ResponseWriter, r *http.Request) {
 		return fmt.Sprintf("Устройство #%d", id)
 	}
 	if data.Tab == "logs" {
-		events, err := a.Events.EventsFiltered(r.Context(), securityevents.EventFilter{DeviceID: data.DeviceID, Channel: data.Channel, From: from, To: to, Limit: 100})
+		permitted, err := a.eventsScopeIDs(r)
+		if err != nil {
+			http.Error(w, "Доступ к событиям не определён", 503)
+			return
+		}
+		events, err := a.Events.EventsFiltered(r.Context(), securityevents.EventFilter{DeviceID: data.DeviceID, DeviceIDs: permitted, Channel: data.Channel, From: from, To: to, Limit: 100})
 		if err != nil {
 			http.Error(w, "Events unavailable", http.StatusServiceUnavailable)
 			return
@@ -253,7 +265,7 @@ func (a *App) SecurityEventsPage(w http.ResponseWriter, r *http.Request) {
 		for _, e := range events {
 			data.Events = append(data.Events, eventsDisplayRow{StoredEvent: e, EventDescription: securityevents.DescribeEvent(e.Event), Hostname: name(e.DeviceID)})
 		}
-		gaps, err := a.Events.Gaps(r.Context(), data.DeviceID, 100)
+		gaps, err := a.Events.GapsScoped(r.Context(), data.DeviceID, 100, permitted)
 		if err != nil {
 			http.Error(w, "Events gaps unavailable", http.StatusServiceUnavailable)
 			return

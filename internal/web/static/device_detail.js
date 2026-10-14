@@ -76,7 +76,8 @@ const loaders = {
       const cancel = t.cancel_requested ? '<div class="text-muted">Отмена запрошена</div>'
         : t.can_cancel ? `<div><button class="btn btn-sm btn-ghost" type="button" data-act="cancelTask" data-task-id="${Number(t.id)}">Отменить</button></div>` : '';
       const code = (t.status==='done'||t.status==='failed'||t.status==='cancelled') ? `<div>Код завершения: ${Number(t.exit_code)}</div>` : '';
-      return `<tr><td class="text-muted" style="white-space:nowrap">${esc(t.created)}</td><td>${esc(t.label||t.kind)}</td><td>${st}${cancel}</td><td class="text-muted" style="word-break:break-word;white-space:pre-wrap">${esc(t.result)||'—'}${code}</td></tr>`; }, 4),
+      const job = Number(t.job_id)>0 ? `<div><a href="/jobs/${Number(t.job_id)}" style="font-size:12px">Задание #${Number(t.job_id)}</a></div>` : '';
+      return `<tr><td class="text-muted" style="white-space:nowrap">${esc(t.created)}</td><td>${esc(t.label||t.kind)}${job}</td><td>${st}${cancel}</td><td class="text-muted" style="word-break:break-word;white-space:pre-wrap">${esc(t.result)||'—'}${code}</td></tr>`; }, 4),
   metrics: () => loadMetrics(),
 };
 const loaded = {};

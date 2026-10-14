@@ -51,7 +51,7 @@ func (a *App) eventsBackupPanel() eventsBackupPanel {
 // Every operation is admin-only, disabled in demo and protected by route CSRF.
 // Input selects a validated basename from the configured Events backup directory.
 func (a *App) EventsBackupAction(w http.ResponseWriter, r *http.Request) {
-	u, ok := a.findingAccess(w, r, true)
+	u, ok := a.eventsAdminAccess(w, r)
 	if !ok {
 		return
 	}

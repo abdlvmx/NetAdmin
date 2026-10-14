@@ -185,7 +185,7 @@ func actionIcon(action string) string {
 // actionCat — категория действия для метки справа в ленте активности.
 func actionCat(action string) string {
 	switch {
-	case strings.Contains(action, "login"), strings.Contains(action, "logout"), strings.Contains(action, "user"), strings.Contains(action, "password"):
+	case strings.Contains(action, "login"), strings.Contains(action, "logout"), strings.Contains(action, "user"), strings.Contains(action, "password"), strings.HasPrefix(action, "mfa_"):
 		return "Пользователи"
 	case strings.Contains(action, "device"), strings.Contains(action, "scan"):
 		return "Устройства"
@@ -207,9 +207,9 @@ var standalone = template.Must(
 var layoutPages = map[string]*template.Template{}
 
 func init() {
-	pages := []string{"dashboard", "devices", "device_detail", "employees", "users", "settings", "diagnostics", "audit", "profile", "network_map", "network_changes", "licenses", "discovery",
+	pages := []string{"dashboard", "scoped_dashboard", "device_groups", "user_access", "devices", "device_detail", "employees", "users", "settings", "diagnostics", "audit", "profile", "network_map", "network_changes", "licenses", "discovery",
 		"servicemon", "sla", "capacity", "topology", "forbidden", "disk_health",
-		"tickets", "ticket_detail", "snmp", "snmp_ports", "commands", "packages"}
+		"tickets", "ticket_detail", "snmp", "snmp_ports", "commands", "packages", "jobs", "job_detail", "job_result"}
 	if edition.Events {
 		pages = append(pages, "securityevents", "securityfinding")
 	}

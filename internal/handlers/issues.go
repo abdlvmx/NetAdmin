@@ -53,6 +53,9 @@ const maxIssueItems = 4
 // Свести их в один SQL можно, но читать такой запрос было бы невозможно, а
 // меняются они порознь.
 func (a *App) issueGroups() []issueGroup {
+	if a.scope != nil {
+		return nil
+	}
 	groups := []issueGroup{
 		a.offlineDevices(),
 		a.overloadedDevices(),

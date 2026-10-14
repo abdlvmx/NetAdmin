@@ -15,6 +15,7 @@ import (
 
 	"netadmin/internal/auth"
 	"netadmin/internal/config"
+	"netadmin/internal/deviceaccess"
 	"netadmin/internal/edition"
 	"netadmin/internal/tz"
 	"netadmin/internal/web"
@@ -235,10 +236,11 @@ func (a *App) DeployPackage(w http.ResponseWriter, r *http.Request) {
 	if r.FormValue("all") != "" {
 		targets = a.agentDeviceIDs()
 	} else {
-		for _, s := range r.Form["device"] {
-			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
-				targets = append(targets, id)
-			}
+		var err error
+		targets, err = deviceaccess.IDs(r.Form["device"], 5000)
+		if err != nil {
+			http.Error(w, "Проверьте выбранные устройства", 400)
+			return
 		}
 	}
 	if len(targets) == 0 {
@@ -246,11 +248,13 @@ func (a *App) DeployPackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload, _ := json.Marshal(p)
-	for _, id := range targets {
-		a.enqueuePackageTask(id, "install", string(payload), "Установка: "+p.Name, user.ID, p.ID)
+	job, err := a.enqueueJob(r.Context(), targets, taskSpec{Kind: "install", Payload: string(payload), Label: "Установка: " + p.Name, PackageID: p.ID}, user.ID)
+	if err != nil {
+		http.Error(w, "Установка не поставлена. Обновите выборку и повторите действие.", 503)
+		return
 	}
 	auth.LogAction(a.DB, user.ID, "package_deploy", p.Name, strconv.Itoa(len(targets))+" устройств")
-	http.Redirect(w, r, "/packages?message=Установка+поставлена+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
+	http.Redirect(w, r, "/jobs/"+strconv.FormatInt(job.ID, 10)+"?result=created", http.StatusSeeOther)
 }
 
 // DeployAgentUpdate — POST /packages/agent-update (admin) : разослать новую
@@ -292,11 +296,13 @@ func (a *App) DeployAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload, _ := json.Marshal(p)
-	for _, id := range targets {
-		a.enqueuePackageTask(id, "selfupdate", string(payload), "Обновление агента: "+p.Name, user.ID, p.ID)
+	job, err := a.enqueueJob(r.Context(), targets, taskSpec{Kind: "selfupdate", Payload: string(payload), Label: "Обновление агента: " + p.Name, PackageID: p.ID}, user.ID)
+	if err != nil {
+		http.Error(w, "Обновление не поставлено. Повторите действие.", 503)
+		return
 	}
 	auth.LogAction(a.DB, user.ID, "agent_update", p.Name, strconv.Itoa(len(targets))+" устройств")
-	http.Redirect(w, r, "/packages?message=Обновление+агента+поставлено+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
+	http.Redirect(w, r, "/jobs/"+strconv.FormatInt(job.ID, 10)+"?result=created", http.StatusSeeOther)
 }
 
 // agentVersions — сводка версий агента по парку (что уже обновилось).

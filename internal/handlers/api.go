@@ -65,6 +65,8 @@ func (a *App) metricSeries(deviceID int64, hours, bucket int) []metricPoint {
 		rollFilter = " AND device_id=?"
 		args = append(args, deviceID)
 	}
+	rawFilter += " AND " + a.deviceScopeSQL("metrics_history.device_id")
+	rollFilter += " AND " + a.deviceScopeSQL("metrics_rollup.device_id")
 	q := `SELECT bucket_ts, AVG(cpu), AVG(ram), AVG(disk) FROM (
 		SELECT datetime((CAST(strftime('%s', ts) AS INTEGER)/?)*?, 'unixepoch') AS bucket_ts,
 		       cpu_usage cpu, ram_usage ram, disk_usage disk
@@ -121,7 +123,7 @@ func (a *App) DevicesStatus(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.DB.QueryContext(r.Context(), `SELECT id, COALESCE(status,'unknown'), COALESCE(last_seen,''),
 		COALESCE(status='offline' OR cpu_usage>=90 OR ram_usage>=90 OR disk_usage>=90
 			OR (last_seen IS NOT NULL AND last_seen < datetime('now','-10 minutes')),0),
-		(COALESCE(agent_token,'')<>'') FROM devices`)
+		(COALESCE(agent_token,'')<>'') FROM devices WHERE `+a.deviceScopeSQL("devices.id"))
 	if err != nil {
 		log.Printf("DevicesStatus: %v", err)
 		http.Error(w, "db error", http.StatusInternalServerError)

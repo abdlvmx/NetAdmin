@@ -1,0 +1,19 @@
+{{define "title"}}Центр заданий{{end}}
+{{define "extra_head"}}<style>.jobs-topbar{flex-wrap:wrap}.jobs-topbar>div{min-width:0;flex:1 1 240px}</style>{{end}}
+{{define "content"}}
+<div class="topbar jobs-topbar"><div><h1>Центр заданий</h1><div class="sub">Команды, установка ПО, обновления и диагностика</div></div><a class="btn btn-ghost" href="/commands">Запустить команду</a></div>
+<div class="content">
+{{if .User.DeviceRestricted}}<p class="text-muted" style="margin-bottom:16px">Показаны результаты только по доступным вам ПК.</p>{{end}}
+<form class="toolbar" method="get" action="/jobs">
+<input name="q" value="{{.Query}}" placeholder="Название задания, имя ПК или IP" aria-label="Поиск заданий" maxlength="200">
+<select name="status" aria-label="Состояние задания"><option value="">Все состояния</option><option value="active" {{if eq .Status "active"}}selected{{end}}>В работе и ожидании</option><option value="failed" {{if eq .Status "failed"}}selected{{end}}>Есть ошибки</option><option value="finished" {{if eq .Status "finished"}}selected{{end}}>Завершённые</option></select>
+<select name="kind" aria-label="Тип задания"><option value="">Все действия</option><option value="command" {{if eq .Kind "command"}}selected{{end}}>Команды</option><option value="install" {{if eq .Kind "install"}}selected{{end}}>Установка ПО</option><option value="selfupdate" {{if eq .Kind "selfupdate"}}selected{{end}}>Обновление агента</option><option value="check" {{if eq .Kind "check"}}selected{{end}}>Самодиагностика</option><option value="reboot" {{if eq .Kind "reboot"}}selected{{end}}>Перезагрузка</option><option value="shutdown" {{if eq .Kind "shutdown"}}selected{{end}}>Выключение</option><option value="logoff" {{if eq .Kind "logoff"}}selected{{end}}>Выход из сессии</option></select>
+<button class="btn btn-primary" type="submit">Показать</button>{{if or .Query .Kind .Status}}<a href="/jobs" class="btn btn-ghost">Сбросить</a>{{end}}
+</form>
+<div class="card"><div class="table-wrap"><table><thead><tr><th>Задание</th><th>Создано</th><th>Состояние</th><th>Прогресс</th><th>Результат по ПК</th></tr></thead><tbody>
+{{range .Jobs}}<tr><td><a href="/jobs/{{.ID}}" style="font-weight:600">{{if .Label}}{{.Label}}{{else}}Задание #{{.ID}}{{end}}</a><div class="text-muted" style="font-size:12px">#{{.ID}}{{if .ParentID}} · повтор задания #{{.ParentID}}{{end}}</div></td><td class="text-muted">{{.Created}}</td><td><span class="badge {{.Badge}}">{{.State}}</span></td><td><progress max="100" value="{{.Percent}}" aria-label="Завершено {{.Percent}} процентов" style="width:100px"></progress><div class="text-muted" style="font-size:12px">{{.Percent}}% · ПК: {{.Total}}</div></td><td><span class="text-green">{{.Done}} выполнено</span>{{if .Failed}} · <span class="text-red">{{.Failed}} ошибок</span>{{end}}{{if .Pending}} · {{.Pending}} ожидают{{end}}{{if .Running}} · {{.Running}} выполняются{{end}}{{if .Sent}} · {{.Sent}} выдано{{end}}{{if .Cancelled}} · {{.Cancelled}} отменено{{end}}{{if .Deleted}} · {{.Deleted}} ПК удалено{{end}}</td></tr>
+{{else}}<tr><td colspan="5" class="empty">Заданий по этой выборке нет. Запустите команду из библиотеки или действие в карточке ПК.</td></tr>{{end}}
+</tbody></table></div></div>
+{{if .NextBefore}}<p style="margin-top:16px"><a class="btn btn-ghost" href="/jobs?before={{.NextBefore}}&amp;q={{.Query}}&amp;kind={{.Kind}}&amp;status={{.Status}}">Более ранние задания</a></p>{{end}}
+<p class="text-muted" style="font-size:12px;margin-top:16px">Действия, выполненные до появления центра, сохранены отдельными карточками. Их прежние номера и результаты не изменены.</p>
+</div>{{end}}

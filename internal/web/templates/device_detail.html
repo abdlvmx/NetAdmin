@@ -271,11 +271,11 @@
     <form method="post" action="/devices/{{.Device.ID}}/update">
       <input type="hidden" name="redirect" value="/devices/{{.Device.ID}}?message=Сохранено">
       <div class="form-row cols-2">
-        <div class="form-group"><label>Имя хоста *</label><input name="hostname" value="{{.Device.Hostname}}" required></div>
-        <div class="form-group"><label>IP-адрес</label><input name="ip_address" value="{{.Device.IP}}"></div>
+        <div class="form-group"><label>Имя хоста *</label><input name="hostname" value="{{.Device.Hostname}}" required {{if .User.DeviceRestricted}}readonly{{end}}></div>
+        <div class="form-group"><label>IP-адрес</label><input name="ip_address" value="{{.Device.IP}}" {{if .User.DeviceRestricted}}readonly{{end}}></div>
       </div>
       <div class="form-row cols-2">
-        <div class="form-group"><label>MAC-адрес</label><input name="mac_address" value="{{.Device.MAC}}"></div>
+        <div class="form-group"><label>MAC-адрес</label><input name="mac_address" value="{{.Device.MAC}}" {{if .User.DeviceRestricted}}readonly{{end}}></div>
         <div class="form-group"><label>ОС</label><input name="os_type" value="{{.Device.OSType}}"></div>
       </div>
       <div class="form-row cols-2">

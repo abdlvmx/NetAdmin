@@ -220,7 +220,7 @@ func (a *App) DiskHealthPage(w http.ResponseWriter, r *http.Request) {
 		COALESCE(d.serial,''), d.size_gb, COALESCE(d.media_type,''), COALESCE(d.health,''),
 		d.temperature, d.power_on_hours, d.wear_pct, d.read_errors, d.predict_fail,
 		COALESCE(d.updated_at,'')
-		FROM disks d LEFT JOIN devices v ON v.id=d.device_id`)
+		FROM disks d LEFT JOIN devices v ON v.id=d.device_id WHERE ` + a.deviceScopeSQL("d.device_id"))
 	hosts := map[string]bool{}
 	if err == nil {
 		defer rows.Close()

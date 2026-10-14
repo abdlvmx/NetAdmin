@@ -16,6 +16,7 @@ jobs:
     # половина кода агента лежит в файлах _windows.go, и на Linux их тесты
     # просто не запускаются — релиз уходил бы непроверенным там, где работает.
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

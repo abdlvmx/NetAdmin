@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"netadmin/internal/auth"
+	"netadmin/internal/deviceaccess"
 	"netadmin/internal/tz"
 	"netadmin/internal/web"
 )
@@ -71,7 +72,7 @@ func (a *App) CommandsPage(w http.ResponseWriter, r *http.Request) {
 	data := commandsData{User: user, Active: "commands", Library: commandLibrary, Msg: r.URL.Query().Get("message")}
 
 	if rows, err := a.DB.Query(`SELECT id, hostname FROM devices
-		WHERE COALESCE(agent_token,'')<>'' ORDER BY hostname`); err == nil {
+		WHERE COALESCE(agent_token,'')<>'' AND ` + a.deviceScopeSQL("devices.id") + ` ORDER BY hostname`); err == nil {
 		for rows.Next() {
 			var o employeeOpt
 			if rows.Scan(&o.ID, &o.Name) == nil {
@@ -87,7 +88,7 @@ func (a *App) CommandsPage(w http.ResponseWriter, r *http.Request) {
 	if rows, err := a.DB.Query(`SELECT COALESCE(d.hostname,''), COALESCE(t.label,''),
 		COALESCE(t.status,''), COALESCE(t.result,''), COALESCE(t.created_at,'')
 		FROM agent_tasks t LEFT JOIN devices d ON d.id=t.device_id
-		WHERE t.kind='command' ORDER BY t.id DESC LIMIT 80`); err == nil {
+		WHERE t.kind='command' AND ` + a.deviceScopeSQL("t.device_id") + ` ORDER BY t.id DESC LIMIT 80`); err == nil {
 		for rows.Next() {
 			var row cmdRunRow
 			var created string
@@ -128,15 +129,28 @@ func (a *App) RunCommand(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if r.FormValue("all") == "" {
+		var err error
+		targets, err = deviceaccess.IDs(r.Form["device"], 5000)
+		if err != nil {
+			http.Error(w, "Проверьте выбранные устройства", 400)
+			return
+		}
+	}
 	if len(targets) == 0 {
 		http.Redirect(w, r, "/commands?message=Не+выбраны+устройства", http.StatusSeeOther)
 		return
 	}
-	for _, id := range targets {
-		a.enqueueTask(id, "command", def.Key, "Команда: "+def.Name, user.ID)
+	if !a.checkScopedTargets(w, targets) {
+		return
+	}
+	job, err := a.enqueueJob(r.Context(), targets, taskSpec{Kind: "command", Payload: def.Key, Label: "Команда: " + def.Name}, user.ID)
+	if err != nil {
+		http.Error(w, "Команды не поставлены. Обновите выборку и повторите действие.", 503)
+		return
 	}
 	auth.LogAction(a.DB, user.ID, "command_run", def.Key, strconv.Itoa(len(targets))+" устройств")
-	http.Redirect(w, r, "/commands?message=Команда+поставлена+на+"+strconv.Itoa(len(targets))+"+ПК", http.StatusSeeOther)
+	http.Redirect(w, r, "/jobs/"+strconv.FormatInt(job.ID, 10)+"?result=created", http.StatusSeeOther)
 }
 
 // RunDeviceCommand — POST /devices/{id}/run-command : запуск команды на одном ПК (JSON, CanWrite).
@@ -157,7 +171,11 @@ func (a *App) RunDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": false, "error": "на устройстве не установлен агент"})
 		return
 	}
-	a.enqueueTask(id, "command", def.Key, "Команда: "+def.Name, user.ID)
+	job, err := a.enqueueJob(r.Context(), []int64{id}, taskSpec{Kind: "command", Payload: def.Key, Label: "Команда: " + def.Name}, user.ID)
+	if err != nil {
+		http.Error(w, "Задание не поставлено", 503)
+		return
+	}
 	auth.LogAction(a.DB, user.ID, "command_run", def.Key, strconv.FormatInt(id, 10))
-	writeJSON(w, map[string]any{"ok": true, "message": def.Name + ": задача поставлена"})
+	writeJSON(w, map[string]any{"ok": true, "message": def.Name + ": задача поставлена", "job_id": job.ID})
 }

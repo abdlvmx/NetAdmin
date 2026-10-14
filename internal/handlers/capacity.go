@@ -41,7 +41,7 @@ func (a *App) CapacityPage(w http.ResponseWriter, r *http.Request) {
 	var devs []dev
 	if rows, err := a.DB.Query(`SELECT id, hostname FROM devices
 		WHERE id IN (SELECT DISTINCT device_id FROM metrics_history
-		             UNION SELECT DISTINCT device_id FROM metrics_rollup) ORDER BY hostname`); err == nil {
+		             UNION SELECT DISTINCT device_id FROM metrics_rollup) AND ` + a.deviceScopeSQL("devices.id") + ` ORDER BY hostname`); err == nil {
 		for rows.Next() {
 			var d dev
 			if rows.Scan(&d.id, &d.host) == nil {
@@ -83,9 +83,9 @@ func (a *App) CapacityPage(w http.ResponseWriter, r *http.Request) {
 func (a *App) allDailySeries() (disk, ram map[int64][]float64) {
 	disk, ram = map[int64][]float64{}, map[int64][]float64{}
 	rows, err := a.DB.Query(`SELECT device_id, day, AVG(d), AVG(r) FROM (
-			SELECT device_id, date(ts) day, disk_usage d, ram_usage r FROM metrics_history
+			SELECT device_id, date(ts) day, disk_usage d, ram_usage r FROM metrics_history WHERE ` + a.deviceScopeSQL("metrics_history.device_id") + `
 			UNION ALL
-			SELECT device_id, date(bucket) day, disk_avg, ram_avg FROM metrics_rollup WHERE period='day'
+			SELECT device_id, date(bucket) day, disk_avg, ram_avg FROM metrics_rollup WHERE period='day' AND ` + a.deviceScopeSQL("metrics_rollup.device_id") + `
 		) GROUP BY device_id, day ORDER BY device_id, day`)
 	if err != nil {
 		log.Printf("allDailySeries: %v", err)

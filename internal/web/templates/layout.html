@@ -473,26 +473,34 @@
 
     <div class="section-label">Устройства</div>
     <a title="Список" href="/devices" class="{{if eq .Active "devices"}}active{{end}}"><svg class="ico"><use href="#i-devices"/></svg> <span class="label">Список</span></a>
+    {{if .User.IsAdmin}}<a title="Группы устройств" href="/device-groups" class="{{if eq .Active "device_groups"}}active{{end}}"><svg class="ico"><use href="#i-people"/></svg> <span class="label">Группы устройств</span></a>{{end}}
+    {{if not .User.DeviceRestricted}}
     <a title="Карта сети" href="/network-map" class="{{if eq .Active "network_map"}}active{{end}}"><svg class="ico"><use href="#i-map"/></svg> <span class="label">Карта сети</span></a>
     <a title="Обнаружение" href="/discovery" class="{{if eq .Active "discovery"}}active{{end}}"><svg class="ico"><use href="#i-search"/></svg> <span class="label">Обнаружение</span></a>
     <a title="SNMP-устройства" href="/snmp" class="{{if eq .Active "snmp"}}active{{end}}"><svg class="ico"><use href="#i-antenna"/></svg> <span class="label">SNMP-устройства</span></a>
     <a title="Изменения сети" href="/network-changes" class="{{if eq .Active "network_changes"}}active{{end}}"><svg class="ico"><use href="#i-changes"/></svg> <span class="label">Изменения сети</span></a>
     <a title="Зависимости" href="/topology" class="{{if eq .Active "topology"}}active{{end}}"><svg class="ico"><use href="#i-link"/></svg> <span class="label">Зависимости</span></a>
+    {{end}}
 
     <div class="section-label">Обслуживание</div>
-    <a title="Заявки" href="/tickets" class="{{if eq .Active "tickets"}}active{{end}}"><svg class="ico"><use href="#i-ticket"/></svg> <span class="label">Заявки</span></a>
+    {{if not .User.DeviceRestricted}}<a title="Заявки" href="/tickets" class="{{if eq .Active "tickets"}}active{{end}}"><svg class="ico"><use href="#i-ticket"/></svg> <span class="label">Заявки</span></a>{{end}}
     <a title="Команды" href="/commands" class="{{if eq .Active "commands"}}active{{end}}"><svg class="ico"><use href="#i-terminal"/></svg> <span class="label">Команды</span></a>
-    {{if and (eventsEnabled) .User.IsAdmin}}<a title="События Windows" href="/events" class="{{if eq .Active "securityevents"}}active{{end}}"><svg class="ico"><use href="#i-list"/></svg> <span class="label">События Windows</span></a>{{end}}
+    <a title="Центр заданий" href="/jobs" class="{{if eq .Active "jobs"}}active{{end}}"><svg class="ico"><use href="#i-list"/></svg> <span class="label">Центр заданий</span></a>
+    {{if and (eventsEnabled) .User.CanAnalyzeEvents}}<a title="События Windows" href="/events" class="{{if eq .Active "securityevents"}}active{{end}}"><svg class="ico"><use href="#i-list"/></svg> <span class="label">События Windows</span></a>{{end}}
+    {{if not .User.DeviceRestricted}}
     <a title="Установка ПО" href="/packages" class="{{if eq .Active "packages"}}active{{end}}"><svg class="ico"><use href="#i-package"/></svg> <span class="label">Установка ПО</span></a>
 
     <div class="section-label">Учёт</div>
     <a title="Сотрудники" href="/employees" class="{{if eq .Active "employees"}}active{{end}}"><svg class="ico"><use href="#i-people"/></svg> <span class="label">Сотрудники</span></a>
     <a title="Лицензии ПО" href="/licenses" class="{{if eq .Active "licenses"}}active{{end}}"><svg class="ico"><use href="#i-receipt"/></svg> <span class="label">Лицензии ПО</span></a>
     <a title="Запрещённое ПО" href="/forbidden" class="{{if eq .Active "forbidden"}}active{{end}}"><svg class="ico"><use href="#i-ban"/></svg> <span class="label">Запрещённое ПО</span></a>
+    {{end}}
 
     <div class="section-label">Мониторинг</div>
+    {{if not .User.DeviceRestricted}}
     <a title="Сервисы" href="/monitoring" class="{{if eq .Active "monitoring"}}active{{end}}"><svg class="ico"><use href="#i-activity"/></svg> <span class="label">Сервисы</span></a>
     <a title="Доступность" href="/sla" class="{{if eq .Active "sla"}}active{{end}}"><svg class="ico"><use href="#i-uptime"/></svg> <span class="label">Доступность</span></a>
+    {{end}}
     <a title="Здоровье дисков" href="/disk-health" class="{{if eq .Active "disk_health"}}active{{end}}"><svg class="ico"><use href="#i-disk"/></svg> <span class="label">Здоровье дисков</span></a>
     <a title="Прогноз ёмкости" href="/capacity" class="{{if eq .Active "capacity"}}active{{end}}"><svg class="ico"><use href="#i-trend"/></svg> <span class="label">Прогноз ёмкости</span></a>
 

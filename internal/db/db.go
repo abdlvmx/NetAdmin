@@ -56,6 +56,29 @@ CREATE TABLE IF NOT EXISTS devices (
     notes         TEXT DEFAULT '',
     employee_id   INTEGER REFERENCES employees(id)
 );
+CREATE TABLE IF NOT EXISTS device_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    name_key TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS device_group_members (
+    group_id INTEGER NOT NULL REFERENCES device_groups(id) ON DELETE CASCADE,
+    device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    PRIMARY KEY(group_id,device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_device_group_device ON device_group_members(device_id,group_id);
+CREATE TABLE IF NOT EXISTS user_device_access (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL CHECK(mode IN ('all','groups')),
+    revision INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS user_device_groups (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES device_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id,group_id)
+);
 CREATE TABLE IF NOT EXISTS departments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT UNIQUE NOT NULL,
@@ -77,6 +100,31 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id    INTEGER NOT NULL,
     expires_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS mfa_accounts (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    secret TEXT NOT NULL,
+    setup_session TEXT NOT NULL DEFAULT '',
+    setup_password TEXT NOT NULL DEFAULT '',
+    setup_expires INTEGER NOT NULL DEFAULT 0,
+    last_step INTEGER NOT NULL DEFAULT -1,
+    failures INTEGER NOT NULL DEFAULT 0,
+    last_failure INTEGER NOT NULL DEFAULT 0,
+    blocked_until INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS mfa_recovery (
+    user_id INTEGER NOT NULL REFERENCES mfa_accounts(user_id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    PRIMARY KEY(user_id, code_hash)
+);
+CREATE TABLE IF NOT EXISTS mfa_challenges (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    password_hash TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    expires INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mfa_challenges_expires ON mfa_challenges(expires);
 CREATE TABLE IF NOT EXISTS audit_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER,
@@ -367,6 +415,27 @@ CREATE TABLE IF NOT EXISTS metrics_rollup (
 CREATE INDEX IF NOT EXISTS idx_rollup_bucket ON metrics_rollup(bucket);
 `
 
+// Existing task IDs and delivery state stay unchanged. Older actions each get
+// their own job: timestamps alone cannot reliably identify a historical batch.
+const taskJobsSchema = `
+CREATE TABLE IF NOT EXISTS agent_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    target_count INTEGER NOT NULL,
+    parent_id INTEGER DEFAULT 0,
+    legacy_task_id INTEGER UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_job ON agent_tasks(job_id,id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_retry ON agent_tasks(retry_of) WHERE retry_of>0;
+INSERT INTO agent_jobs(kind,label,created_by,created_at,target_count,legacy_task_id)
+SELECT COALESCE(kind,''),COALESCE(label,''),created_by,COALESCE(created_at,''),1,id
+FROM agent_tasks WHERE COALESCE(job_id,0)=0 AND NOT EXISTS(SELECT 1 FROM agent_jobs WHERE legacy_task_id=agent_tasks.id);
+UPDATE agent_tasks SET job_id=(SELECT id FROM agent_jobs WHERE legacy_task_id=agent_tasks.id) WHERE COALESCE(job_id,0)=0;
+`
+
 // InitSchema создаёт таблицы, индексы и применяет миграции (идемпотентно).
 func InitSchema(d *sql.DB) error {
 	if _, err := d.Exec(schema); err != nil {
@@ -399,12 +468,15 @@ func InitSchema(d *sql.DB) error {
 		{"agent_tasks", "started_at", "TEXT"},
 		{"agent_tasks", "execution_key", "TEXT DEFAULT ''"},
 		{"agent_tasks", "cancel_requested", "INTEGER DEFAULT 0"},
+		{"agent_tasks", "job_id", "INTEGER DEFAULT 0"},
+		{"agent_tasks", "retry_of", "INTEGER DEFAULT 0"},
 		{"sessions", "last_activity", "TEXT"},
 		{"snmp_devices", "supply_alert", "INTEGER DEFAULT 0"},
 	} {
 		safeAddColumn(d, m.table, m.col, m.def)
 	}
-	return nil
+	_, err := d.Exec(taskJobsSchema)
+	return err
 }
 
 // safeAddColumn добавляет колонку, если её ещё нет.

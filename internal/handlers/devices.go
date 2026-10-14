@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"netadmin/internal/auth"
+	"netadmin/internal/deviceaccess"
 	"netadmin/internal/netscan"
 	"netadmin/internal/tz"
 	"netadmin/internal/web"
@@ -157,7 +158,7 @@ func (a *App) listDevices() []deviceRow {
 		FROM devices d
 		LEFT JOIN users u ON d.owner_id=u.id
 		LEFT JOIN employees e ON d.employee_id=e.id
-		ORDER BY d.created_at DESC`)
+		WHERE ` + a.deviceScopeSQL("d.id") + ` ORDER BY d.created_at DESC`)
 	if err != nil {
 		return nil
 	}
@@ -194,7 +195,7 @@ func (a *App) listEmployees() []employeeOpt {
 	rows, err := a.DB.Query(`
 		SELECT e.id, e.full_name, COALESCE(d.name,'')
 		FROM employees e LEFT JOIN departments d ON e.department_id=d.id
-		WHERE e.is_active=1 ORDER BY e.full_name`)
+		WHERE e.is_active=1 AND (` + a.employeeScopeSQL() + `) ORDER BY e.full_name`)
 	if err != nil {
 		return nil
 	}
@@ -263,10 +264,28 @@ func (a *App) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	_ = r.ParseForm()
 	f := r.FormValue
+	if a.scope != nil {
+		if !a.scopedEmployeeAllowed(f("employee_id")) {
+			http.Error(w, "Выбранный сотрудник недоступен.", 403)
+			return
+		}
+		var host, ip, mac string
+		if err := a.DB.QueryRow("SELECT hostname,COALESCE(ip_address,''),COALESCE(mac_address,'') FROM devices WHERE id=? AND "+a.deviceScopeSQL("devices.id"), id).Scan(&host, &ip, &mac); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		for key, value := range map[string]string{"hostname": host, "ip_address": ip, "mac_address": mac} {
+			if r.Form.Has(key) && strings.TrimSpace(f(key)) != value {
+				http.Error(w, "Изменение имени и сетевых адресов требует полного доступа к парку.", 403)
+				return
+			}
+			r.Form.Set(key, value)
+		}
+	}
 	_, err := a.DB.Exec(`
 		UPDATE devices SET hostname=?, ip_address=?, mac_address=?, os_type=?, employee_id=?,
 			device_type=?, manufacturer=?, model=?, serial_number=?, location=?, notes=?, critical=?
-		WHERE id=?`,
+		WHERE id=? AND `+a.deviceScopeSQL("devices.id"),
 		strings.TrimSpace(f("hostname")), strings.TrimSpace(f("ip_address")),
 		strings.TrimSpace(f("mac_address")), strings.TrimSpace(f("os_type")),
 		employeeParam(f("employee_id")),
@@ -427,11 +446,18 @@ func (a *App) Ping(w http.ResponseWriter, r *http.Request) {
 		IP string `json:"ip"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	if a.scope != nil {
+		var count int
+		if err := a.DB.QueryRow("SELECT COUNT(*) FROM devices WHERE ip_address=? AND "+a.deviceScopeSQL("devices.id"), body.IP).Scan(&count); err != nil || count == 0 {
+			http.Error(w, "Адрес недоступен для диагностики", 403)
+			return
+		}
+	}
 	status := "offline"
 	if netscan.PingHost(body.IP) {
 		status = "online"
 	}
-	_, _ = a.DB.Exec("UPDATE devices SET status=?, last_seen=datetime('now') WHERE ip_address=?",
+	_, _ = a.DB.Exec("UPDATE devices SET status=?, last_seen=datetime('now') WHERE ip_address=? AND "+a.deviceScopeSQL("devices.id"),
 		status, body.IP)
 	writeJSON(w, map[string]any{"ip": body.IP, "status": status})
 }
@@ -478,8 +504,19 @@ func (a *App) BulkDevices(w http.ResponseWriter, r *http.Request) {
 			ids = append(ids, id)
 		}
 	}
+	if a.scope != nil {
+		var err error
+		ids, err = deviceaccess.IDs(r.Form["device"], 5000)
+		if err != nil {
+			http.Error(w, "Проверьте выбранные устройства", 400)
+			return
+		}
+	}
 	if len(ids) == 0 {
 		http.Redirect(w, r, "/devices?error=Не+выбраны+устройства", http.StatusSeeOther)
+		return
+	}
+	if !a.checkScopedTargets(w, ids) {
 		return
 	}
 
@@ -497,6 +534,10 @@ func (a *App) BulkDevices(w http.ResponseWriter, r *http.Request) {
 		args = append(args, value)
 	case "employee":
 		// пустое значение снимает привязку
+		if !a.scopedEmployeeAllowed(value) {
+			http.Error(w, "Выбранный сотрудник недоступен. Изменения не внесены.", 403)
+			return
+		}
 		query = "UPDATE devices SET employee_id=? WHERE id IN (" + marks + ")"
 		args = append(args, nullableID(value))
 	case "critical":
@@ -522,7 +563,7 @@ func (a *App) BulkDevices(w http.ResponseWriter, r *http.Request) {
 		args = append(args, id)
 	}
 
-	res, err := a.DB.Exec(query, args...)
+	res, err := a.scopedBulkExec(r.Context(), query, args, ids)
 	if err != nil {
 		log.Printf("групповая операция %q: %v", action, err)
 		http.Redirect(w, r, "/devices?error=Не+удалось+применить+действие", http.StatusSeeOther)

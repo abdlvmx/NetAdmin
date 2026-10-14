@@ -69,11 +69,12 @@ type DeviceStatus struct {
 }
 
 type EventFilter struct {
-	DeviceID int64
-	Channel  string
-	From     time.Time
-	To       time.Time
-	Limit    int
+	DeviceIDs []int64 // nil is unrestricted; a non-nil empty list matches none.
+	DeviceID  int64
+	Channel   string
+	From      time.Time
+	To        time.Time
+	Limit     int
 }
 
 // Open creates the dedicated security-events.db at path. Cleanup runs both on
@@ -590,6 +591,10 @@ func (s *Store) EventsFiltered(ctx context.Context, filter EventFilter) ([]Store
 		query += ` AND event_time<=?`
 		args = append(args, filter.To.UnixMilli())
 	}
+	query, args, err := appendDeviceScope(query, args, filter.DeviceIDs)
+	if err != nil {
+		return nil, err
+	}
 	query += ` ORDER BY event_time DESC,seq DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -613,6 +618,10 @@ func (s *Store) EventsFiltered(ctx context.Context, filter EventFilter) ([]Store
 }
 
 func (s *Store) Gaps(ctx context.Context, deviceID int64, limit int) ([]StoredGap, error) {
+	return s.GapsScoped(ctx, deviceID, limit, nil)
+}
+
+func (s *Store) GapsScoped(ctx context.Context, deviceID int64, limit int, devices []int64) ([]StoredGap, error) {
 	if deviceID < 0 {
 		return nil, ErrInvalid
 	}
@@ -625,6 +634,10 @@ func (s *Store) Gaps(ctx context.Context, deviceID int64, limit int) ([]StoredGa
 	if deviceID != 0 {
 		query += ` AND device_id=?`
 		args = append(args, deviceID)
+	}
+	query, args, err := appendDeviceScope(query, args, devices)
+	if err != nil {
+		return nil, err
 	}
 	query += ` ORDER BY seq DESC LIMIT ?`
 	args = append(args, limit)

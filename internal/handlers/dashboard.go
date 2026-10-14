@@ -89,6 +89,10 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
+	if a.scope != nil {
+		a.ScopedDashboard(w, r, user)
+		return
+	}
 
 	s := a.dashboardStats()
 	s.DevicesOnlinePct = pct(s.DevicesOnline, s.DevicesTotal)

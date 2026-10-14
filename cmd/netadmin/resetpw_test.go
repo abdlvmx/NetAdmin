@@ -96,6 +96,32 @@ func TestResetPasswordSingleAdmin(t *testing.T) {
 	}
 }
 
+func TestConsoleMFAResetRequiresExplicitConfirmation(t *testing.T) {
+	for _, answer := range []string{"", "нет", "СБРОС"} {
+		t.Run("answer="+answer, func(t *testing.T) {
+			d := resetEnv(t, account{username: "admin", role: "admin", active: true})
+			var id int64
+			d.QueryRow("SELECT id FROM users WHERE username='admin'").Scan(&id)
+			if _, err := d.Exec("INSERT INTO mfa_accounts(user_id,enabled,secret) VALUES(?,1,'encrypted-test-secret')", id); err != nil {
+				t.Fatal(err)
+			}
+			withInput(t, "Novyjparol1", "Novyjparol1", answer)
+			if err := resetPassword(""); err != nil {
+				t.Fatal(err)
+			}
+			enabled, err := (&auth.MFA{DB: d}).Enabled(id)
+			if err != nil || enabled != (answer != "СБРОС") {
+				t.Fatalf("MFA state for %q: %t %v", answer, enabled, err)
+			}
+			var audited int
+			d.QueryRow("SELECT COUNT(*) FROM audit_log WHERE action='mfa_reset_console'").Scan(&audited)
+			if (audited == 1) != (answer == "СБРОС") {
+				t.Fatal("console factor reset audit mismatch")
+			}
+		})
+	}
+}
+
 // Смена пароля закрывает все прежние сессии: иначе замок сменили, а старый
 // ключ остался работать.
 func TestResetPasswordClosesSessions(t *testing.T) {

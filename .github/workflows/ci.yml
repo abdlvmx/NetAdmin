@@ -45,6 +45,14 @@ jobs:
       - name: Тесты
         run: go test ./...
 
+      - name: Проверки Events
+        shell: pwsh
+        run: |
+          go vet -tags securityevents ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -tags securityevents ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # gofmt здесь нет намеренно. В рабочих копиях под Windows файлы лежат с
       # CRLF (core.autocrlf), gofmt считает это расхождением с форматом и
       # помечает почти весь репозиторий. Проверка была бы красной всегда и
@@ -57,4 +65,16 @@ jobs:
         env:
           GOOS: linux
           GOARCH: amd64
-        run: go build ./...
+        shell: pwsh
+        run: |
+          go build ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -tags securityevents ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Проверка обоих комплектов Windows
+        shell: pwsh
+        run: |
+          ./scripts/build-windows.ps1 -Version 0.0.0-ci -Edition all
+          ./scripts/package-windows.ps1 -Version 0.0.0-ci -Edition standard -DistDir dist/standard
+          ./scripts/package-windows.ps1 -Version 0.0.0-ci -Edition events -DistDir dist/events

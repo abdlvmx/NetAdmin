@@ -57,9 +57,13 @@ func (a *App) Search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	add("Устройства", a.searchDevices(q))
-	add("Сотрудники", a.searchEmployees(q))
+	if a.scope == nil {
+		add("Сотрудники", a.searchEmployees(q))
+	}
 	add("Программы", a.searchSoftware(q))
-	add("Заявки", a.searchTickets(q))
+	if a.scope == nil {
+		add("Заявки", a.searchTickets(q))
+	}
 
 	writeJSON(w, map[string]any{"groups": groups})
 }
@@ -90,7 +94,7 @@ func (a *App) searchDevices(q string) []searchItem {
 	rows, err := a.DB.Query(`SELECT d.id, COALESCE(d.hostname,''), COALESCE(d.ip_address,''),
 		COALESCE(d.mac_address,''), COALESCE(d.location,''), COALESCE(e.full_name,'')
 		FROM devices d LEFT JOIN employees e ON e.id = d.employee_id
-		ORDER BY d.hostname`)
+		WHERE ` + a.deviceScopeSQL("d.id") + ` ORDER BY d.hostname`)
 	if err != nil {
 		log.Printf("поиск (устройства): %v", err)
 		return nil
@@ -147,7 +151,7 @@ func (a *App) searchEmployees(q string) []searchItem {
 // установленного ПО на парке — десятки тысяч.
 func (a *App) searchSoftware(q string) []searchItem {
 	rows, err := a.DB.Query(`SELECT s.name, COUNT(DISTINCT s.device_id) AS cnt
-		FROM software s WHERE COALESCE(s.name,'')<>''
+		FROM software s WHERE COALESCE(s.name,'')<>'' AND ` + a.deviceScopeSQL("s.device_id") + `
 		GROUP BY s.name ORDER BY cnt DESC, s.name`)
 	if err != nil {
 		log.Printf("поиск (программы): %v", err)

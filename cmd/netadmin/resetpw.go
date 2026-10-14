@@ -101,6 +101,37 @@ func resetPassword(login string) error {
 	if _, err := d.Exec("DELETE FROM sessions WHERE user_id=?", acc.id); err != nil {
 		fmt.Println("  Предупреждение: прежние сессии не удалось закрыть:", err)
 	}
+	// Older installations may not have the MFA tables yet. Password reset
+	// alone preserves an enabled factor; removing it requires an explicit
+	// decision by the local machine administrator.
+	var hasMFA int
+	if err := d.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='mfa_accounts'").Scan(&hasMFA); err != nil {
+		return err
+	}
+	if hasMFA > 0 {
+		if _, err := d.Exec("DELETE FROM mfa_challenges WHERE user_id=?", acc.id); err != nil {
+			return err
+		}
+		enabled, err := (&auth.MFA{DB: d}).Enabled(acc.id)
+		if err != nil {
+			return err
+		}
+		if enabled {
+			fmt.Println("  Для учётной записи включён двухфакторный вход.")
+			answer, confirmed := wincon.AskLine("  Если приложение и коды потеряны, для выключения второго фактора введите СБРОС: ")
+			if confirmed && strings.EqualFold(strings.TrimSpace(answer), "СБРОС") {
+				if _, err := d.Exec("DELETE FROM mfa_accounts WHERE user_id=?", acc.id); err != nil {
+					return err
+				}
+				auth.LogAction(d, 0, "mfa_reset_console", acc.username, "второй фактор сброшен с консоли сервера")
+				fmt.Println("  Второй фактор выключен. Подключите приложение заново в профиле.")
+			}
+		} else {
+			if _, err := d.Exec("DELETE FROM mfa_accounts WHERE user_id=? AND enabled=0", acc.id); err != nil {
+				return err
+			}
+		}
+	}
 
 	enabled := ""
 	if !acc.active {
@@ -123,7 +154,7 @@ func resetPassword(login string) error {
 
 	fmt.Println()
 	fmt.Printf("Готово: пароль для «%s» изменён%s.\n", acc.username, enabled)
-	fmt.Println("Прежние сессии закрыты — войдите заново на http://127.0.0.1:8765")
+	fmt.Println("Прежние сессии закрыты — войдите заново по адресу сервера.")
 	return nil
 }
 

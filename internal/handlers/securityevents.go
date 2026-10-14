@@ -18,16 +18,16 @@ import (
 )
 
 func (a *App) registerEventsRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /events", a.SecurityEventsPage)
-	mux.HandleFunc("POST /events/devices/{id}/policy", a.SetSecurityEventsPolicy)
-	mux.HandleFunc("POST /api/agent-events/poll", a.AgentEventsPoll)
-	mux.HandleFunc("POST /api/agent-events/batch", a.AgentEventsBatch)
-	mux.HandleFunc("GET /events/findings/{id}", a.SecurityFindingPage)
-	mux.HandleFunc("POST /events/findings/{id}", a.UpdateSecurityFinding)
-	mux.HandleFunc("POST /events/rules/{id}", a.UpdateSecurityRule)
-	mux.HandleFunc("POST /events/rules/{id}/exceptions", a.AddSecurityException)
-	mux.HandleFunc("POST /events/exceptions/{id}/delete", a.DeleteSecurityException)
-	mux.HandleFunc("POST /events/backups/{operation}", a.EventsBackupAction)
+	mux.HandleFunc("GET /events", a.deviceScoped((*App).SecurityEventsPage))
+	mux.HandleFunc("POST /events/devices/{id}/policy", a.deviceScoped((*App).SetSecurityEventsPolicy))
+	mux.HandleFunc("POST /api/agent-events/poll", a.deviceScoped((*App).AgentEventsPoll))
+	mux.HandleFunc("POST /api/agent-events/batch", a.deviceScoped((*App).AgentEventsBatch))
+	mux.HandleFunc("GET /events/findings/{id}", a.deviceScoped((*App).SecurityFindingPage))
+	mux.HandleFunc("POST /events/findings/{id}", a.deviceScoped((*App).UpdateSecurityFinding))
+	mux.HandleFunc("POST /events/rules/{id}", a.deviceScoped((*App).UpdateSecurityRule))
+	mux.HandleFunc("POST /events/rules/{id}/exceptions", a.deviceScoped((*App).AddSecurityException))
+	mux.HandleFunc("POST /events/exceptions/{id}/delete", a.deviceScoped((*App).DeleteSecurityException))
+	mux.HandleFunc("POST /events/backups/{operation}", a.deviceScoped((*App).EventsBackupAction))
 }
 
 // Events requires a native HTTPS connection; forwarded headers never enable it.

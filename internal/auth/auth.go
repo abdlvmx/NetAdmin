@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -42,20 +43,26 @@ const (
 
 // User — пользователь системы.
 type User struct {
-	ID       int64
-	Username string
-	FullName string
-	Email    string
-	Role     string
-	IsActive int
+	ID               int64
+	Username         string
+	FullName         string
+	Email            string
+	Role             string
+	IsActive         int
+	DeviceRestricted bool
 }
 
 // IsAdmin — полный доступ.
 func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
 
+// CanAnalyzeEvents grants investigation access without server administration.
+func (u *User) CanAnalyzeEvents() bool { return u != nil && (u.IsAdmin() || u.Role == "analyst") }
+
 // CanWrite — право изменять инвентарь/запускать скан (admin и user/operator,
 // но не viewer).
 func (u *User) CanWrite() bool { return u != nil && (u.Role == "admin" || u.Role == "user") }
+
+func (u *User) CanManageFleet() bool { return u.CanWrite() && !u.DeviceRestricted }
 
 func HashPassword(pw string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
@@ -96,6 +103,41 @@ func hashToken(token string) string {
 // CreateSession создаёт сессию (8ч жизни, idle-таймаут отдельно) и возвращает
 // токен для cookie. В базу пишется только его хеш.
 func CreateSession(db *sql.DB, userID int64) (string, error) {
+	return CreatePasswordSession(db, userID, "")
+}
+
+// A password-only session must not race with MFA activation or password reset.
+// Verified MFA flows call createSession inside their own factor transaction.
+func CreatePasswordSession(db *sql.DB, userID int64, passwordHash string) (string, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var valid int
+	err = tx.QueryRow(`SELECT COUNT(*) FROM users u WHERE u.id=? AND u.is_active=1 AND (?='' OR u.password_hash=?)
+        AND NOT EXISTS(SELECT 1 FROM mfa_accounts m WHERE m.user_id=u.id AND m.enabled<>0)`, userID, passwordHash, passwordHash).Scan(&valid)
+	if err != nil {
+		return "", err
+	}
+	if valid != 1 {
+		return "", ErrMFAState
+	}
+	token, err := createSession(tx, userID)
+	if err != nil {
+		return "", err
+	}
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+type sessionWriter interface {
+	Exec(string, ...any) (sql.Result, error)
+}
+
+func createSession(db sessionWriter, userID int64) (string, error) {
 	token := randomHex(32)
 	now := time.Now().UTC()
 	expires := now.Add(8 * time.Hour).Format(sqlTimeLayout)
@@ -118,17 +160,23 @@ func CurrentUser(db *sql.DB, r *http.Request) *User {
 	// is_active проверяется здесь, а не только при входе: иначе отключённая
 	// учётная запись продолжала бы работать по выданной ранее сессии.
 	row := db.QueryRow(`
-		SELECT u.id, u.username, u.full_name, u.email, u.role, u.is_active, COALESCE(s.last_activity,'')
+		SELECT u.id, u.username, u.full_name, u.email, u.role, u.is_active, COALESCE(s.last_activity,''), COALESCE(da.mode,'all')
 		FROM sessions s JOIN users u ON s.user_id = u.id
+        LEFT JOIN user_device_access da ON da.user_id=u.id
 		WHERE s.token = ? AND s.expires_at > datetime('now') AND u.is_active = 1`, tok)
 	var u User
 	var fullName, email sql.NullString
 	var la string
-	if err := row.Scan(&u.ID, &u.Username, &fullName, &email, &u.Role, &u.IsActive, &la); err != nil {
+	var accessMode string
+	if err := row.Scan(&u.ID, &u.Username, &fullName, &email, &u.Role, &u.IsActive, &la, &accessMode); err != nil {
 		return nil
 	}
 	u.FullName = fullName.String
 	u.Email = email.String
+	if accessMode != "all" && accessMode != "groups" {
+		return nil
+	}
+	u.DeviceRestricted = !u.IsAdmin() && accessMode == "groups"
 
 	now := time.Now().UTC()
 	if t, e := time.Parse(sqlTimeLayout, la); e == nil {
@@ -156,6 +204,38 @@ func DeleteSession(db *sql.DB, token string) {
 // срока ранее выданной сессии.
 func DeleteUserSessions(db *sql.DB, userID int64) {
 	_, _ = db.Exec("DELETE FROM sessions WHERE user_id = ?", userID)
+	_, _ = db.Exec("DELETE FROM mfa_challenges WHERE user_id = ?", userID)
+}
+
+// UpdatePassword preserves this session by its stored hash, and atomically
+// invalidates other sessions, pending logins and unconfirmed MFA provisioning.
+func UpdatePassword(db *sql.DB, userID int64, oldHash, newHash, currentToken string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec("UPDATE users SET password_hash=? WHERE id=? AND password_hash=? AND is_active=1", newHash, userID, oldHash)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errors.New("account changed during password update")
+	}
+	if _, err = tx.Exec("DELETE FROM sessions WHERE user_id=? AND token<>?", userID, hashToken(currentToken)); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("DELETE FROM mfa_challenges WHERE user_id=?", userID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("DELETE FROM mfa_accounts WHERE user_id=? AND enabled=0", userID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // PurgeExpiredSessions убирает протухшие сессии: без этого таблица только растёт.

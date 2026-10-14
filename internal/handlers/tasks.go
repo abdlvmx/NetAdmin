@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -25,13 +26,11 @@ func (a *App) enqueueTask(deviceID int64, kind, payload, label string, userID in
 // по нему проверяется право агента скачать файл. Разбирать ради этого JSON
 // в SQL было бы хрупко.
 func (a *App) enqueuePackageTask(deviceID int64, kind, payload, label string, userID, pkgID int64) (int64, error) {
-	res, err := a.DB.Exec(`INSERT INTO agent_tasks (device_id, kind, payload, label, status, created_by, package_id)
-		VALUES (?,?,?,?, 'pending', ?, ?)`, deviceID, kind, payload, label, userID, pkgID)
+	job, err := a.enqueueJob(context.Background(), []int64{deviceID}, taskSpec{Kind: kind, Payload: payload, Label: label, PackageID: pkgID}, userID)
 	if err != nil {
 		return 0, err
 	}
-	id, _ := res.LastInsertId()
-	return id, nil
+	return job.Tasks[0], nil
 }
 
 // AgentTasksPoll — POST /api/agent-tasks/poll : агент забирает свои ожидающие задачи.
@@ -169,10 +168,11 @@ func (a *App) DeviceTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	rows, err := a.DB.Query(`SELECT id,COALESCE(label,''), COALESCE(kind,''), COALESCE(status,''),
-		exit_code, COALESCE(result,''), COALESCE(created_at,''), COALESCE(done_at,''),task_protocol,COALESCE(cancel_requested,0)
+		exit_code, COALESCE(result,''), COALESCE(created_at,''), COALESCE(done_at,''),task_protocol,COALESCE(cancel_requested,0),COALESCE(job_id,0)
 		FROM agent_tasks WHERE device_id=? ORDER BY id DESC LIMIT 100`, id)
 	type item struct {
 		ID              int64  `json:"id"`
+		JobID           int64  `json:"job_id"`
 		CanCancel       bool   `json:"can_cancel"`
 		CancelRequested bool   `json:"cancel_requested"`
 		Label           string `json:"label"`
@@ -190,7 +190,7 @@ func (a *App) DeviceTasks(w http.ResponseWriter, r *http.Request) {
 			var it item
 			var created, done string
 			var protocol int
-			if rows.Scan(&it.ID, &it.Label, &it.Kind, &it.Status, &it.ExitCode, &it.Result, &created, &done, &protocol, &it.CancelRequested) == nil {
+			if rows.Scan(&it.ID, &it.Label, &it.Kind, &it.Status, &it.ExitCode, &it.Result, &created, &done, &protocol, &it.CancelRequested, &it.JobID) == nil {
 				it.CanCancel = user.CanWrite() && (it.Status == "pending" || (protocol == 2 && (it.Status == "sent" || it.Status == "running")))
 				it.Created = tz.DateTime(created)
 				it.Done = tz.DateTime(done)

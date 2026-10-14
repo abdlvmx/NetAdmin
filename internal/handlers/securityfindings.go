@@ -38,7 +38,7 @@ type findingPageData struct {
 }
 
 func (a *App) findingAdmins(r *http.Request) ([]findingAdmin, error) {
-	rows, err := a.DB.QueryContext(r.Context(), `SELECT id,username FROM users WHERE role='admin' AND is_active=1 ORDER BY username`)
+	rows, err := a.DB.QueryContext(r.Context(), `SELECT id,username FROM users WHERE role IN ('admin','analyst') AND is_active=1 ORDER BY username`)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,11 @@ func (a *App) loadFindingsPanel(r *http.Request, data *eventsPageData, names map
 	for _, u := range admins {
 		owners[u.ID] = u.Name
 	}
-	findings, err := a.Events.Findings(r.Context(), securityevents.FindingFilter{DeviceID: data.DeviceID, RuleID: data.RuleFilter, Status: data.FindingStatus, Limit: 100})
+	permitted, err := a.eventsScopeIDs(r)
+	if err != nil {
+		return err
+	}
+	findings, err := a.Events.Findings(r.Context(), securityevents.FindingFilter{DeviceID: data.DeviceID, DeviceIDs: permitted, RuleID: data.RuleFilter, Status: data.FindingStatus, Limit: 100})
 	if err != nil {
 		return err
 	}
@@ -127,8 +131,8 @@ func (a *App) loadRulesPanel(r *http.Request, data *eventsPageData, names map[in
 
 func (a *App) findingAccess(w http.ResponseWriter, r *http.Request, write bool) (*auth.User, bool) {
 	u := auth.CurrentUser(a.DB, r)
-	if !u.IsAdmin() {
-		http.Error(w, "Доступ разрешён только администратору", http.StatusForbidden)
+	if !u.CanAnalyzeEvents() {
+		http.Error(w, "Доступ разрешён администратору или аналитику Events", http.StatusForbidden)
 		return nil, false
 	}
 	if a.Events == nil {
@@ -140,6 +144,14 @@ func (a *App) findingAccess(w http.ResponseWriter, r *http.Request, write bool) 
 		return nil, false
 	}
 	return u, true
+}
+
+func (a *App) eventsAdminAccess(w http.ResponseWriter, r *http.Request) (*auth.User, bool) {
+	if !auth.CurrentUser(a.DB, r).IsAdmin() {
+		http.Error(w, "Управление Events доступно только администратору", http.StatusForbidden)
+		return nil, false
+	}
+	return a.findingAccess(w, r, true)
 }
 func findingError(w http.ResponseWriter, err error) {
 	switch {
@@ -163,6 +175,15 @@ func findingID(r *http.Request) (int64, error) {
 
 // Check current registration before returning data from a retained device ID.
 func (a *App) currentFinding(r *http.Request, id int64) (securityevents.FindingDetails, string, error) {
+	if a.scope != nil {
+		device, err := a.Events.FindingDevice(r.Context(), id)
+		if err != nil {
+			return securityevents.FindingDetails{}, "", err
+		}
+		if !a.scopedDeviceAllowed(device) {
+			return securityevents.FindingDetails{}, "", sql.ErrNoRows
+		}
+	}
 	f, err := a.Events.Finding(r.Context(), id)
 	if err != nil {
 		return f, "", err
@@ -201,6 +222,13 @@ func (a *App) SecurityFindingPage(w http.ResponseWriter, r *http.Request) {
 		findingError(w, err)
 		return
 	}
+	eligible := admins[:0]
+	for _, person := range admins {
+		if a.findingAssigneeAllowed(r, person.ID, f.DeviceID) {
+			eligible = append(eligible, person)
+		}
+	}
+	admins = eligible
 	owner := ""
 	for _, admin := range admins {
 		if admin.ID == f.AssigneeID {
@@ -225,7 +253,8 @@ func (a *App) UpdateSecurityFinding(w http.ResponseWriter, r *http.Request) {
 		findingError(w, err)
 		return
 	}
-	if _, _, err = a.currentFinding(r, id); err != nil {
+	current, _, err := a.currentFinding(r, id)
+	if err != nil {
 		findingError(w, err)
 		return
 	}
@@ -246,11 +275,15 @@ func (a *App) UpdateSecurityFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if owner > 0 {
 		var n int
-		if err = a.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users WHERE id=? AND role='admin' AND is_active=1`, owner).Scan(&n); err != nil {
+		if err = a.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users WHERE id=? AND role IN ('admin','analyst') AND is_active=1`, owner).Scan(&n); err != nil {
 			findingError(w, err)
 			return
 		}
 		if n != 1 {
+			findingError(w, securityevents.ErrInvalid)
+			return
+		}
+		if !a.findingAssigneeAllowed(r, owner, current.DeviceID) {
 			findingError(w, securityevents.ErrInvalid)
 			return
 		}
@@ -265,7 +298,7 @@ func (a *App) UpdateSecurityFinding(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) UpdateSecurityRule(w http.ResponseWriter, r *http.Request) {
-	u, ok := a.findingAccess(w, r, true)
+	u, ok := a.eventsAdminAccess(w, r)
 	if !ok {
 		return
 	}
@@ -299,7 +332,7 @@ func (a *App) UpdateSecurityRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) AddSecurityException(w http.ResponseWriter, r *http.Request) {
-	u, ok := a.findingAccess(w, r, true)
+	u, ok := a.eventsAdminAccess(w, r)
 	if !ok {
 		return
 	}
@@ -343,7 +376,7 @@ func (a *App) AddSecurityException(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) DeleteSecurityException(w http.ResponseWriter, r *http.Request) {
-	u, ok := a.findingAccess(w, r, true)
+	u, ok := a.eventsAdminAccess(w, r)
 	if !ok {
 		return
 	}

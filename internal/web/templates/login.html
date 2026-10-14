@@ -68,18 +68,32 @@
       Данные вымышленные, база временная.
     </div>{{end}}
     {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+    {{if .MFA}}
+    <h2 style="font-size:17px;margin-bottom:10px">Подтверждение входа</h2>
+    <p style="font-size:13px;line-height:1.6;color:var(--muted);margin-bottom:18px">Для {{.Username}} введите код из приложения-аутентификатора. Если телефон недоступен, используйте один резервный код.</p>
+    <form method="post" action="/login/mfa">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="form-group">
+        <label for="mfa-code">Код подтверждения или резервный код</label>
+        <input id="mfa-code" type="text" name="code" autocomplete="one-time-code" spellcheck="false" autocapitalize="none" maxlength="40" autofocus required>
+      </div>
+      <button class="btn" type="submit">Подтвердить вход</button>
+    </form>
+    <p class="hint"><a href="/login">Ввести логин и пароль заново</a></p>
+    {{else}}
     <form method="post" action="/login">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <div class="form-group">
         <label>Логин</label>
-        <input type="text" name="username" placeholder="admin" autofocus required>
+        <input type="text" name="username" placeholder="admin" autocomplete="username" autofocus required>
       </div>
       <div class="form-group">
         <label>Пароль</label>
-        <input type="password" name="password" placeholder="••••••••" required>
+        <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
       </div>
       <button class="btn" type="submit">Войти</button>
     </form>
+    {{end}}
   </div>
   <p class="hint">Для новой базы администратор создаётся при первом запуске.</p>
 </div>

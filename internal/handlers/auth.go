@@ -7,6 +7,7 @@ import (
 
 	"netadmin/internal/auth"
 	"netadmin/internal/config"
+	"netadmin/internal/edition"
 	"netadmin/internal/web"
 )
 
@@ -16,8 +17,13 @@ func (a *App) Root(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", http.StatusFound)
 		return
 	}
-	if auth.CurrentUser(a.DB, r) == nil {
+	user := auth.CurrentUser(a.DB, r)
+	if user == nil {
 		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	if edition.Events && user.Role == "analyst" {
+		http.Redirect(w, r, "/events", http.StatusFound)
 		return
 	}
 	http.Redirect(w, r, "/dashboard", http.StatusFound)
@@ -25,6 +31,8 @@ func (a *App) Root(w http.ResponseWriter, r *http.Request) {
 
 // LoginPage — GET /login.
 func (a *App) LoginPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	a.clearMFAChallenge(w, r)
 	if !auth.HasUsers(a.DB) {
 		http.Redirect(w, r, "/setup", http.StatusFound)
 		return
@@ -34,6 +42,7 @@ func (a *App) LoginPage(w http.ResponseWriter, r *http.Request) {
 
 // Login — POST /login.
 func (a *App) Login(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !auth.HasUsers(a.DB) {
 		http.Redirect(w, r, "/setup", http.StatusFound)
 		return
@@ -74,20 +83,45 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		web.Render(w, "login.html", map[string]any{"Error": "Неверный логин или пароль", "CSRF": csrfToken(r)})
 		return
 	}
+	enabled, err := a.mfa().Enabled(id)
+	if err != nil {
+		http.Error(w, "Проверка входа недоступна. Повторите позже.", http.StatusServiceUnavailable)
+		return
+	}
+	if enabled {
+		if !mfaTransportAllowed(r) {
+			web.Render(w, "login.html", map[string]any{"Error": "Для двухфакторного входа откройте сервер по HTTPS.", "CSRF": csrfToken(r)})
+			return
+		}
+		a.clearMFAChallenge(w, r)
+		challenge, e := a.mfa().BeginChallenge(id, hash)
+		if e != nil {
+			web.Render(w, "login.html", map[string]any{"Error": mfaError(e), "CSRF": csrfToken(r)})
+			return
+		}
+		if c, e := r.Cookie("session"); e == nil {
+			auth.DeleteSession(a.DB, c.Value)
+		}
+		clearSessionCookie(w, r)
+		setMFACookie(w, r, challenge)
+		http.Redirect(w, r, "/login/mfa", http.StatusSeeOther)
+		return
+	}
 	loginLimiter.reset(ip)
 	userLockout.reset(username)
+	a.clearMFAChallenge(w, r)
 	// защита от session fixation: гасим любую прежнюю сессию из cookie и выдаём новую
 	if c, e := r.Cookie("session"); e == nil && c.Value != "" {
 		auth.DeleteSession(a.DB, c.Value)
 	}
-	token, err := auth.CreateSession(a.DB, id)
+	token, err := auth.CreatePasswordSession(a.DB, id, hash)
 	if err != nil {
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
 	}
 	auth.LogAction(a.DB, id, "login", "session", ip)
 	setSessionCookie(w, token, r)
-	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+	http.Redirect(w, r, a.loginDestination(id), http.StatusSeeOther)
 }
 
 // SetupPage — GET /setup.
@@ -153,6 +187,7 @@ func (a *App) Setup(w http.ResponseWriter, r *http.Request) {
 // Logout — POST /logout. Именно POST: по GET выход дёргался любой картинкой
 // с чужой страницы, и пользователя выкидывало из системы без его участия.
 func (a *App) Logout(w http.ResponseWriter, r *http.Request) {
+	a.clearMFAChallenge(w, r)
 	if c, err := r.Cookie("session"); err == nil {
 		auth.DeleteSession(a.DB, c.Value)
 	}
